@@ -30,7 +30,7 @@ function buildHash(section: { type: string; slug?: string }, pagePath: string | 
   if (section.type === "agent" && section.slug) return `#/agents/${section.slug}`;
   if (section.type === "agents") return "#/agents";
   if (section.type === "jobs") return "#/jobs";
-  if (section.type === "settings") return "#/settings";
+  if (section.type === "settings") return section.slug ? `#/settings/${section.slug}` : "#/settings";
   return "#/agents";
 }
 
@@ -49,6 +49,10 @@ function parseHash(hash: string): RouteState {
   if (raw === "agents") return { section: { type: "agents" }, pagePath: null };
   if (raw === "jobs") return { section: { type: "jobs" }, pagePath: null };
   if (raw === "settings") return { section: { type: "settings" }, pagePath: null };
+  if (raw.startsWith("settings/")) {
+    const slug = raw.slice("settings/".length);
+    return { section: { type: "settings", slug }, pagePath: null };
+  }
 
   return { section: { type: "agents" }, pagePath: null };
 }
