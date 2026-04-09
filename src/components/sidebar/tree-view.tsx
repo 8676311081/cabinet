@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useTreeStore } from "@/stores/tree-store";
+import { useEditorStore } from "@/stores/editor-store";
 import { useAppStore } from "@/stores/app-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TreeNode } from "./tree-node";
@@ -82,7 +83,9 @@ const itemClass = (active: boolean) =>
   );
 
 export function TreeView() {
-  const { nodes, loading } = useTreeStore();
+  const { nodes, loading, selectedPath } = useTreeStore();
+  const selectPage = useTreeStore((s) => s.selectPage);
+  const loadPage = useEditorStore((s) => s.loadPage);
   const section = useAppStore((s) => s.section);
   const setSection = useAppStore((s) => s.setSection);
 
@@ -242,20 +245,36 @@ export function TreeView() {
             )}
 
             {/* ── Knowledge Base (depth 1) ─────────────────── */}
-            <button
-              onClick={() => setKbExpanded(!kbExpanded)}
-              className={itemClass(section.type === "page")}
+            <div
+              className={itemClass(section.type === "page" && selectedPath === "")}
               style={pad(1)}
             >
-              <ChevronRight
-                className={cn(
-                  "h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150",
-                  kbExpanded && "rotate-90"
-                )}
-              />
-              <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
-              Knowledge Base
-            </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setKbExpanded(!kbExpanded);
+                }}
+                className="shrink-0"
+              >
+                <ChevronRight
+                  className={cn(
+                    "h-3.5 w-3.5 text-muted-foreground/70 transition-transform duration-150",
+                    kbExpanded && "rotate-90"
+                  )}
+                />
+              </button>
+              <button
+                onClick={() => {
+                  selectPage("");
+                  loadPage("");
+                  setSection({ type: "page" });
+                }}
+                className="flex items-center gap-1.5 min-w-0 flex-1"
+              >
+                <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+                Knowledge Base
+              </button>
+            </div>
 
             {kbExpanded && (
               <>
