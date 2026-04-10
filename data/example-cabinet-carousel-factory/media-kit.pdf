@@ -9,7 +9,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>
 endobj
 4 0 obj
-<< /Length 1012 >>
+<< /Length 1017 >>
 stream
 BT
 /F1 28 Tf
@@ -20,18 +20,18 @@ BT
 (Media Kit 2026) Tj
 0 -40 Td
 /F1 14 Tf
-(The AI-first knowledge base) Tj
+(Your knowledge base.) Tj
 0 -20 Td
-(for founders who ship.) Tj
+(Your AI team.) Tj
 0 -40 Td
 /F2 10 Tf
 (Key Facts) Tj
 0 -18 Td
-(Open source  |  File-based  |  Self-hosted) Tj
+(Open source  |  File-first  |  Self-hosted) Tj
 0 -16 Td
-(AI agents read and write your knowledge base directly.) Tj
+(Markdown, CSV, PDF, HTML apps, websites, git repos — bring any file.) Tj
 0 -16 Td
-(No database. No cloud lock-in. Everything is markdown on disk.) Tj
+(No database. No cloud lock-in. AI agents work directly on your files.) Tj
 0 -30 Td
 /F1 12 Tf
 (Features) Tj
@@ -80,10 +80,10 @@ xref
 0000000058 00000 n 
 0000000115 00000 n 
 0000000251 00000 n 
-0000001314 00000 n 
-0000001389 00000 n 
+0000001319 00000 n 
+0000001394 00000 n 
 trailer
 << /Size 7 /Root 1 0 R >>
 startxref
-1459
+1464
 %%EOF
