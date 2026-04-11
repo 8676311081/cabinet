@@ -1,35 +1,39 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { ExternalLink, Download, WrapText, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeaderActions } from "@/components/layout/header-actions";
+import { common, createLowlight } from "lowlight";
+import { toHtml } from "hast-util-to-html";
 
 interface SourceViewerProps {
   path: string;
   title: string;
 }
 
+const lowlight = createLowlight(common);
+
 const EXT_TO_LANG: Record<string, string> = {
   ".js": "javascript", ".cjs": "javascript", ".mjs": "javascript",
-  ".ts": "typescript", ".tsx": "tsx", ".jsx": "jsx",
+  ".ts": "typescript", ".tsx": "typescript", ".jsx": "javascript",
   ".py": "python", ".rb": "ruby", ".php": "php",
   ".sh": "bash", ".bash": "bash", ".zsh": "bash", ".ps1": "powershell",
-  ".css": "css", ".scss": "scss", ".html": "html",
+  ".css": "css", ".scss": "scss", ".html": "xml",
   ".json": "json", ".jsonc": "json",
-  ".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".ini": "ini",
+  ".yaml": "yaml", ".yml": "yaml", ".toml": "ini", ".ini": "ini",
   ".xml": "xml", ".sql": "sql", ".graphql": "graphql", ".gql": "graphql",
   ".go": "go", ".rs": "rust", ".swift": "swift",
   ".java": "java", ".kt": "kotlin", ".kts": "kotlin",
   ".c": "c", ".cpp": "cpp", ".h": "c",
-  ".prisma": "prisma", ".env": "bash",
-  ".txt": "plaintext", ".text": "plaintext", ".log": "plaintext",
-  ".mdx": "markdown", ".rst": "plaintext",
+  ".env": "bash",
+  ".txt": "", ".text": "", ".log": "", ".rst": "",
+  ".mdx": "markdown",
 };
 
 function detectLanguage(filename: string): string {
   const ext = filename.includes(".") ? "." + filename.split(".").pop()!.toLowerCase() : "";
-  return EXT_TO_LANG[ext] || "plaintext";
+  return EXT_TO_LANG[ext] ?? "";
 }
 
 function formatBadge(filename: string): string {
@@ -63,14 +67,29 @@ export function SourceViewer({ path, title }: SourceViewerProps) {
     void fetchContent();
   }, [fetchContent]);
 
+  const highlightedLines = useMemo(() => {
+    if (!content) return [];
+    try {
+      const tree = language
+        ? lowlight.highlight(language, content)
+        : lowlight.highlightAuto(content);
+      const html = toHtml(tree);
+      // Split by newlines while preserving HTML tags that span lines
+      return html.split("\n");
+    } catch {
+      // Fallback: no highlighting
+      return content.split("\n").map((line) =>
+        line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      );
+    }
+  }, [content, language]);
+
   const copyToClipboard = () => {
     if (!content) return;
     navigator.clipboard.writeText(content);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
-  const lines = content?.split("\n") || [];
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -83,9 +102,11 @@ export function SourceViewer({ path, title }: SourceViewerProps) {
           <span className="text-xs text-muted-foreground/50 bg-muted px-1.5 py-0.5 rounded">
             {formatBadge(filename)}
           </span>
-          <span className="text-xs text-muted-foreground/40">
-            {language}
-          </span>
+          {language && (
+            <span className="text-xs text-muted-foreground/40">
+              {language}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -137,24 +158,27 @@ export function SourceViewer({ path, title }: SourceViewerProps) {
           <HeaderActions />
         </div>
       </div>
-      <div className="flex-1 overflow-auto bg-[#1e1e1e]">
+      <div className="flex-1 overflow-auto source-viewer-code bg-[#1e1e1e]">
         {loading ? (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
             Loading...
           </div>
         ) : (
-          <pre className={`p-4 text-[13px] leading-relaxed font-mono ${wrap ? "whitespace-pre-wrap break-all" : ""}`}>
-            <code>
-              {lines.map((line, i) => (
-                <div key={i} className="flex">
-                  <span className="inline-block w-12 pr-4 text-right text-[#858585] select-none shrink-0">
+          <table className="w-full border-collapse text-[13px] leading-relaxed font-mono">
+            <tbody>
+              {highlightedLines.map((lineHtml, i) => (
+                <tr key={i} className="hover:bg-white/5">
+                  <td className="w-12 pr-4 text-right text-[#858585] select-none align-top sticky left-0 bg-[#1e1e1e]">
                     {i + 1}
-                  </span>
-                  <span className="text-[#d4d4d4] flex-1">{line || "\n"}</span>
-                </div>
+                  </td>
+                  <td
+                    className={`text-[#d4d4d4] pl-2 ${wrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"}`}
+                    dangerouslySetInnerHTML={{ __html: lineHtml || " " }}
+                  />
+                </tr>
               ))}
-            </code>
-          </pre>
+            </tbody>
+          </table>
         )}
       </div>
     </div>

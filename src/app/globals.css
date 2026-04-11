@@ -499,6 +499,44 @@ html[data-custom-theme] .font-logo,
   color: oklch(0.75 0.12 80);
 }
 
+/* Source viewer syntax highlighting */
+.source-viewer-code .hljs-keyword,
+.source-viewer-code .hljs-selector-tag,
+.source-viewer-code .hljs-built_in { color: #c586c0; }
+
+.source-viewer-code .hljs-string,
+.source-viewer-code .hljs-attr { color: #ce9178; }
+
+.source-viewer-code .hljs-number,
+.source-viewer-code .hljs-literal { color: #b5cea8; }
+
+.source-viewer-code .hljs-comment { color: #6a9955; font-style: italic; }
+
+.source-viewer-code .hljs-function,
+.source-viewer-code .hljs-title { color: #dcdcaa; }
+
+.source-viewer-code .hljs-type,
+.source-viewer-code .hljs-class { color: #4ec9b0; }
+
+.source-viewer-code .hljs-variable,
+.source-viewer-code .hljs-template-variable { color: #9cdcfe; }
+
+.source-viewer-code .hljs-params { color: #9cdcfe; }
+
+.source-viewer-code .hljs-property { color: #9cdcfe; }
+
+.source-viewer-code .hljs-punctuation { color: #d4d4d4; }
+
+.source-viewer-code .hljs-meta { color: #569cd6; }
+
+.source-viewer-code .hljs-tag { color: #569cd6; }
+.source-viewer-code .hljs-name { color: #569cd6; }
+.source-viewer-code .hljs-attribute { color: #9cdcfe; }
+
+.source-viewer-code .hljs-regexp { color: #d16969; }
+
+.source-viewer-code .hljs-symbol { color: #b5cea8; }
+
 /* Electron macOS: hidden title bar drag region + traffic light clearance */
 .electron-desktop header {
   -webkit-app-region: drag;
