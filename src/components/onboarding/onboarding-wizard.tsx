@@ -711,7 +711,7 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
       description:
         "A GitHub star helps more people discover Cabinet and join the community.",
       aside:
-        "If Cabinet feels useful, give it a star.",
+        "Cabinet is open source. If you like the vision, help us spread the word.",
       nextLabel: "Next",
       cards: [],
     },
@@ -1284,7 +1284,6 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
               {/* Floating emoji backdrop per community step */}
               {(() => {
                 const emojiMap: Record<string, string> = {
-                  "GitHub": "✨",
                   "Discord": "💬",
                   "Cabinet Cloud": "☁️",
                 };
