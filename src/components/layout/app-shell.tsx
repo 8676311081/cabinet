@@ -10,6 +10,7 @@ import { CsvViewer } from "@/components/editor/csv-viewer";
 import { SourceViewer } from "@/components/editor/source-viewer";
 import { ImageViewer } from "@/components/editor/image-viewer";
 import { MediaViewer } from "@/components/editor/media-viewer";
+import { MermaidViewer } from "@/components/editor/mermaid-viewer";
 import { HomeScreen } from "@/components/home/home-screen";
 import { AgentsWorkspace } from "@/components/agents/agents-workspace";
 import { JobsManager } from "@/components/jobs/jobs-manager";
@@ -147,6 +148,7 @@ export function AppShell() {
   const isImage = nodeType === "image";
   const isVideo = nodeType === "video";
   const isAudio = nodeType === "audio";
+  const isMermaid = nodeType === "mermaid";
   const hasPersistentUpdateState =
     update?.updateStatus.state === "restart-required" ||
     update?.updateStatus.state === "failed" ||
@@ -247,6 +249,12 @@ export function AppShell() {
       const mediaPath = selectedNode?.path || selectedPath!;
       const mediaTitle = selectedNode?.frontmatter?.title || selectedNode?.name || mediaPath.split("/").pop() || "Media";
       return <MediaViewer path={mediaPath} title={mediaTitle} type={isVideo ? "video" : "audio"} />;
+    }
+
+    if (isMermaid && (selectedNode || selectedPath)) {
+      const mmdPath = selectedNode?.path || selectedPath!;
+      const mmdTitle = selectedNode?.frontmatter?.title || selectedNode?.name || mmdPath.split("/").pop() || "Diagram";
+      return <MermaidViewer path={mmdPath} title={mmdTitle} />;
     }
 
     // Default: editor
