@@ -2,18 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Archive,
   ArrowLeft,
   Bot,
   CheckCircle2,
   Clock3,
-  Crown,
+  FolderOpen,
+  FolderTree,
   HeartPulse,
   Loader2,
   MessageSquare,
+  Send,
   Users,
   XCircle,
-  Zap,
 } from "lucide-react";
 import type { ConversationMeta } from "@/types/conversations";
 import { KBEditor } from "@/components/editor/editor";
@@ -55,30 +55,22 @@ function sortOrgAgents(a: CabinetAgentSummary, b: CabinetAgentSummary): number {
   return a.name.localeCompare(b.name);
 }
 
-function findChiefAgent(agents: CabinetAgentSummary[]): CabinetAgentSummary | null {
-  const ordered = [...agents].sort(sortOrgAgents);
-  return (
-    ordered.find((a) => a.slug.toLowerCase() === "ceo") ||
-    ordered.find((a) => a.name.trim().toLowerCase() === "ceo") ||
-    ordered.find((a) => a.role.toLowerCase().includes("chief executive")) ||
-    ordered.find((a) => a.type === "lead") ||
-    null
-  );
-}
-
-/* ─── Stat Pill ─── */
+/* ─── Inline Metric ─── */
 function StatPill({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium",
-        highlight
-          ? "bg-primary/10 text-primary"
-          : "bg-muted text-muted-foreground"
-      )}
-    >
-      {value} {label}
-    </span>
+    <div className="min-w-[84px]">
+      <p
+        className={cn(
+          "text-[1.75rem] font-semibold leading-none tracking-tight text-foreground",
+          highlight && "text-primary"
+        )}
+      >
+        {value}
+      </p>
+      <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/65">
+        {label}
+      </p>
+    </div>
   );
 }
 
@@ -86,16 +78,17 @@ function StatPill({ label, value, highlight }: { label: string; value: number; h
 function CompactOrgChart({
   cabinetName,
   agents,
+  jobs,
+  children,
   onAgentClick,
 }: {
   cabinetName: string;
   agents: CabinetAgentSummary[];
+  jobs: CabinetJobSummary[];
+  children: CabinetOverview["children"];
   onAgentClick?: (agent: CabinetAgentSummary) => void;
 }) {
-  const chiefAgent = findChiefAgent(agents);
   const allAgents = [...agents].sort(sortOrgAgents);
-
-  // Group by department for section labels
   const grouped = Object.entries(
     allAgents.reduce<Record<string, CabinetAgentSummary[]>>((acc, agent) => {
       const dept = agent.department || "general";
@@ -116,89 +109,212 @@ function CompactOrgChart({
       label: startCase(dept),
       agents: deptAgents.sort(sortOrgAgents),
     }));
+  const groupedRows = grouped.reduce<typeof grouped[]>((rows, group, index) => {
+    const rowIndex = Math.floor(index / 4);
+    if (!rows[rowIndex]) rows[rowIndex] = [];
+    rows[rowIndex].push(group);
+    return rows;
+  }, []);
+
+  const connectorColor = "rgba(139, 94, 60, 0.26)";
+  const rootFill = "rgba(139, 94, 60, 0.1)";
+  const rootBorder = "rgba(139, 94, 60, 0.2)";
+
+  function jobsForAgent(agent: CabinetAgentSummary) {
+    return jobs.filter((job) => {
+      if (job.ownerScopedId) return job.ownerScopedId === agent.scopedId;
+      return job.ownerAgent === agent.slug && job.cabinetPath === agent.cabinetPath;
+    });
+  }
+
+  function VerticalConnector({ height = 18 }: { height?: number }) {
+    return (
+      <div
+        className="mx-auto w-px"
+        style={{ height, backgroundColor: connectorColor }}
+      />
+    );
+  }
+
+  function HorizontalBranch({ count }: { count: number }) {
+    if (count <= 1) return <VerticalConnector height={14} />;
+
+    const edgeInset = count <= 2 ? 25 : count <= 3 ? 16.67 : 12.5;
+    const spacing = count <= 1 ? 0 : (100 - edgeInset * 2) / (count - 1);
+
+    return (
+      <div className="relative mx-5 h-4">
+        <div
+          className="absolute top-0 h-px"
+          style={{
+            left: `${edgeInset}%`,
+            right: `${edgeInset}%`,
+            backgroundColor: connectorColor,
+          }}
+        />
+        {Array.from({ length: count }).map((_, index) => (
+          <div
+            key={index}
+            className="absolute top-0 w-px"
+            style={{
+              left: `${edgeInset + index * spacing}%`,
+              height: 16,
+              backgroundColor: connectorColor,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  function TreeLabel({ children }: { children: React.ReactNode }) {
+    return (
+      <p className="mb-2 mt-2 text-[9px] font-medium uppercase tracking-[0.18em] text-muted-foreground/55">
+        {children}
+      </p>
+    );
+  }
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      {/* Section header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2.5">
-          <Users className="h-4 w-4 text-muted-foreground" />
-          <p className="text-sm font-semibold">Agents</p>
-        </div>
-        <span className="text-xs text-muted-foreground">{agents.length}</span>
-      </div>
-
-      <ScrollArea className="max-h-[480px]">
-        {allAgents.length === 0 ? (
-          <p className="px-4 py-6 text-center text-xs text-muted-foreground">
-            No agents configured for this cabinet.
-          </p>
-        ) : (
-          grouped.map((group, gi) => (
-            <div key={group.dept}>
-              {/* Department label */}
-              <p className={cn(
-                "px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/50 bg-muted/30",
-                gi > 0 && "border-t border-border/50"
-              )}>
-                {group.label}
-              </p>
-              <div className="divide-y divide-border/40">
-                {group.agents.map((agent) => {
-                  const isChief = agent.slug === chiefAgent?.slug;
-                  return (
-                    <div
-                      key={agent.scopedId}
-                      className={cn(
-                        "flex items-center gap-3 px-4 py-2.5",
-                        onAgentClick && "cursor-pointer hover:bg-muted/40 transition-colors"
-                      )}
-                      onClick={() => onAgentClick?.(agent)}
-                    >
-                      <span className="text-lg leading-none w-6 text-center shrink-0">
-                        {agent.emoji || "🤖"}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <p className="truncate text-sm font-medium">{agent.name}</p>
-                          {isChief && (
-                            <Crown className="h-3 w-3 shrink-0 text-amber-500" />
-                          )}
-                        </div>
-                        <p className="line-clamp-1 text-xs text-muted-foreground">{agent.role}</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {agent.heartbeat && (
-                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                            {cronToShortLabel(agent.heartbeat)}
-                          </span>
-                        )}
-                        <span
-                          className={cn(
-                            "h-1.5 w-1.5 rounded-full",
-                            agent.active ? "bg-emerald-500" : "bg-muted-foreground/25"
-                          )}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
+    <div className="overflow-x-auto pb-2">
+      {allAgents.length === 0 ? (
+        <p className="py-8 text-sm text-muted-foreground">No agents configured for this cabinet yet.</p>
+      ) : (
+        <div className="min-w-[720px] px-2">
+          <div className="flex justify-center">
+            <div
+              className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5"
+              style={{ backgroundColor: rootFill, borderColor: rootBorder }}
+            >
+              <FolderTree className="h-4 w-4 shrink-0 text-[rgb(139,94,60)]" />
+              <div>
+                <p className="text-sm font-semibold text-foreground">{cabinetName}</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {agents.length} visible agent{agents.length === 1 ? "" : "s"}
+                </p>
               </div>
             </div>
-          ))
-        )}
-      </ScrollArea>
+          </div>
+
+          {groupedRows.map((row, rowIndex) => (
+            <div key={`row-${rowIndex}`}>
+              <VerticalConnector height={20} />
+              <HorizontalBranch count={row.length} />
+              <div
+                className="grid gap-4"
+                style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))` }}
+              >
+                {row.map((group) => (
+                  <div key={group.dept} className="flex flex-col items-center">
+                    <div
+                      className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5"
+                      style={{
+                        backgroundColor: "rgba(139, 94, 60, 0.05)",
+                        borderColor: "rgba(139, 94, 60, 0.16)",
+                      }}
+                    >
+                      <FolderOpen className="h-3.5 w-3.5 shrink-0 text-[rgb(139,94,60)]" />
+                      <span className="text-xs font-medium text-foreground">{group.label}</span>
+                    </div>
+                    <VerticalConnector height={10} />
+                    <TreeLabel>Agents</TreeLabel>
+                    <div className="flex w-full flex-col items-center gap-2">
+                      {group.agents.map((agent) => {
+                        const agentJobs = jobsForAgent(agent);
+
+                        return (
+                          <div key={agent.scopedId} className="flex w-full flex-col items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => onAgentClick?.(agent)}
+                              className={cn(
+                                "flex w-full max-w-[190px] items-center gap-2 rounded-xl border bg-background px-3 py-2 text-left transition-colors",
+                                onAgentClick && "hover:bg-muted/30"
+                              )}
+                              style={{ borderColor: "rgba(139, 94, 60, 0.14)" }}
+                            >
+                              <span className="text-base leading-none">{agent.emoji || "🤖"}</span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[12px] font-medium text-foreground">
+                                  {agent.name}
+                                </p>
+                                <p className="truncate text-[10px] text-muted-foreground">
+                                  {agent.role}
+                                  {agent.inherited ? ` · ${agent.cabinetName}` : ""}
+                                </p>
+                              </div>
+                              <span
+                                className={cn(
+                                  "h-1.5 w-1.5 rounded-full shrink-0",
+                                  agent.active ? "bg-emerald-500" : "bg-muted-foreground/30"
+                                )}
+                              />
+                            </button>
+
+                            {agentJobs.length > 0 ? (
+                              <div className="flex w-full flex-col items-center gap-1">
+                                {agentJobs.map((job) => (
+                                  <div
+                                    key={job.scopedId}
+                                    className="flex w-full max-w-[182px] items-center gap-1.5 rounded-lg border bg-muted/15 px-2.5 py-1.5"
+                                    style={{ borderColor: "rgba(139, 94, 60, 0.12)" }}
+                                  >
+                                    <Clock3 className="h-3 w-3 shrink-0 text-[rgb(139,94,60)]" />
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate text-[10px] font-medium text-foreground">
+                                        {job.name}
+                                      </p>
+                                      <p className="truncate text-[9px] text-muted-foreground">
+                                        {cronToShortLabel(job.schedule)}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {children.length > 0 ? (
+            <div className="mt-8">
+              <TreeLabel>Child cabinets</TreeLabel>
+              <div className="mt-2 flex flex-wrap gap-3">
+                {children.map((child) => (
+                  <div
+                    key={child.path}
+                    className="inline-flex items-center gap-2 rounded-xl border bg-background px-3 py-2"
+                    style={{ borderColor: "rgba(139, 94, 60, 0.14)" }}
+                  >
+                    <FolderTree className="h-3.5 w-3.5 shrink-0 text-[rgb(139,94,60)]" />
+                    <div>
+                      <p className="text-[12px] font-medium text-foreground">{child.name}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        depth {child.cabinetDepth ?? 1}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
 
 /* ─── Schedules Panel ─── */
 function SchedulesPanel({
-  cabinetPath,
   agents,
   jobs,
 }: {
-  cabinetPath: string;
   agents: CabinetAgentSummary[];
   jobs: CabinetJobSummary[];
 }) {
@@ -217,79 +333,79 @@ function SchedulesPanel({
   }));
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      {/* Jobs */}
-      <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
-        <Clock3 className="h-4 w-4 text-muted-foreground" />
-        <div>
-          <p className="text-sm font-semibold">Jobs</p>
-          <p className="text-xs text-muted-foreground">
-            {jobsWithOwners.length} scheduled {jobsWithOwners.length === 1 ? "job" : "jobs"}
-          </p>
+    <div className="space-y-8">
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/65">
+          Automation
+        </p>
+        <h2 className="mt-2 text-[1.65rem] font-semibold tracking-tight text-foreground">
+          Jobs and heartbeats
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          {jobsWithOwners.length} scheduled jobs and {heartbeatAgents.length} active heartbeats in this scope.
+        </p>
+      </div>
+
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/55">
+          Scheduled jobs
+        </p>
+        <div className="mt-3 border-t border-border/70">
+          {jobsWithOwners.length > 0 ? (
+            jobsWithOwners.map((job) => (
+              <div key={job.scopedId} className="flex items-start gap-3 border-b border-border/60 py-3">
+                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted/40">
+                  <Clock3 className="h-3.5 w-3.5 text-muted-foreground" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{job.name}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {job.ownerName ? `${job.ownerName} · ` : ""}
+                    {cronToHuman(job.schedule)}
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    "mt-0.5 shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                    job.enabled
+                      ? "bg-emerald-500/12 text-emerald-500"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {job.enabled ? "On" : "Off"}
+                </span>
+              </div>
+            ))
+          ) : (
+            <p className="py-4 text-sm text-muted-foreground">No cabinet jobs configured yet.</p>
+          )}
         </div>
       </div>
 
-      <div className="divide-y divide-border/50">
-        {jobsWithOwners.length > 0 ? (
-          jobsWithOwners.map((job) => (
-            <div key={job.scopedId} className="flex items-start gap-3 px-4 py-3">
-              <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted">
-                <Clock3 className="h-3.5 w-3.5 text-muted-foreground" />
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/55">
+          Heartbeats
+        </p>
+        <div className="mt-3 border-t border-border/70">
+          {heartbeatAgents.length > 0 ? (
+            heartbeatAgents.map((agent) => (
+              <div key={agent.scopedId} className="flex items-center gap-3 border-b border-border/60 py-3">
+                <span className="text-lg leading-none shrink-0">{agent.emoji || "🤖"}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{agent.name}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {cronToHuman(agent.heartbeat || "")}
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-full bg-primary/8 px-2.5 py-0.5 text-[10px] font-medium text-primary">
+                  {cronToShortLabel(agent.heartbeat || "")}
+                </span>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{job.name}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {job.ownerName ? `${job.ownerName} · ` : ""}
-                  {cronToHuman(job.schedule)}
-                </p>
-              </div>
-              <span
-                className={cn(
-                  "shrink-0 mt-0.5 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
-                  job.enabled
-                    ? "bg-emerald-500/12 text-emerald-500"
-                    : "bg-muted text-muted-foreground"
-                )}
-              >
-                {job.enabled ? "On" : "Off"}
-              </span>
-            </div>
-          ))
-        ) : (
-          <p className="px-4 py-4 text-xs text-muted-foreground">No cabinet jobs configured yet.</p>
-        )}
-      </div>
-
-      {/* Heartbeats */}
-      <div className="flex items-center gap-2.5 border-b border-t border-border px-4 py-3">
-        <HeartPulse className="h-4 w-4 text-muted-foreground" />
-        <div>
-          <p className="text-sm font-semibold">Heartbeats</p>
-          <p className="text-xs text-muted-foreground">
-            {heartbeatAgents.length} {heartbeatAgents.length === 1 ? "agent" : "agents"} on a rhythm
-          </p>
+            ))
+          ) : (
+            <p className="py-4 text-sm text-muted-foreground">No heartbeats configured yet.</p>
+          )}
         </div>
-      </div>
-
-      <div className="divide-y divide-border/50">
-        {heartbeatAgents.length > 0 ? (
-          heartbeatAgents.map((agent) => (
-            <div key={agent.scopedId} className="flex items-center gap-3 px-4 py-3">
-              <span className="text-lg leading-none shrink-0">{agent.emoji || "🤖"}</span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{agent.name}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {cronToHuman(agent.heartbeat || "")}
-                </p>
-              </div>
-              <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-medium text-primary">
-                {cronToShortLabel(agent.heartbeat || "")}
-              </span>
-            </div>
-          ))
-        ) : (
-          <p className="px-4 py-4 text-xs text-muted-foreground">No heartbeats configured yet.</p>
-        )}
       </div>
     </div>
   );
@@ -305,6 +421,13 @@ function formatRelative(iso: string): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
 }
 
 const TRIGGER_STYLES: Record<ConversationMeta["trigger"], string> = {
@@ -336,17 +459,22 @@ function StatusIcon({ status }: { status: ConversationMeta["status"] }) {
 function CabinetTaskComposer({
   cabinetPath,
   agents,
+  displayName,
   cabinetName,
   onNavigate,
 }: {
   cabinetPath: string;
   agents: CabinetAgentSummary[];
+  displayName: string;
   cabinetName: string;
   onNavigate: (agentSlug: string, agentCabinetPath: string, conversationId: string) => void;
 }) {
   const [selectedAgent, setSelectedAgent] = useState<CabinetAgentSummary | null>(null);
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [agentQuery, setAgentQuery] = useState<string | null>(null);
+  const [agentIndex, setAgentIndex] = useState(0);
+  const [agentMentionStart, setAgentMentionStart] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-select first active own-cabinet agent on load
@@ -368,16 +496,58 @@ function CabinetTaskComposer({
     el.style.height = `${el.scrollHeight}px`;
   }, [prompt]);
 
+  const greeting = getGreeting();
   const activeAgents = agents.filter((a) => a.active);
-  const ownAgents = activeAgents.filter((a) => a.cabinetDepth === 0);
-  const childAgentGroups = activeAgents
-    .filter((a) => a.cabinetDepth > 0)
-    .reduce<Record<string, CabinetAgentSummary[]>>((acc, agent) => {
-      const key = agent.cabinetName || agent.cabinetPath;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(agent);
-      return acc;
-    }, {});
+  const assignableAgents = activeAgents.length > 0 ? activeAgents : agents;
+  const filteredAgents =
+    agentQuery === null
+      ? []
+      : assignableAgents.filter((agent) => {
+          const query = agentQuery.toLowerCase();
+          return (
+            agent.name.toLowerCase().includes(query) ||
+            agent.slug.toLowerCase().includes(query) ||
+            agent.role.toLowerCase().includes(query)
+          );
+        });
+
+  function handlePromptChange(value: string, cursorPosition: number) {
+    setPrompt(value);
+    const textBefore = value.slice(0, cursorPosition);
+    const atIndex = textBefore.lastIndexOf("@");
+
+    if (atIndex === -1) {
+      setAgentQuery(null);
+      return;
+    }
+
+    const charBefore = atIndex > 0 ? textBefore[atIndex - 1] : " ";
+    if (charBefore !== " " && charBefore !== "\n" && atIndex !== 0) {
+      setAgentQuery(null);
+      return;
+    }
+
+    const query = textBefore.slice(atIndex + 1);
+    if (query.includes(" ") || query.includes("\n")) {
+      setAgentQuery(null);
+      return;
+    }
+
+    setAgentMentionStart(atIndex);
+    setAgentQuery(query);
+    setAgentIndex(0);
+  }
+
+  function assignAgent(agent: CabinetAgentSummary) {
+    setSelectedAgent(agent);
+    setAgentQuery(null);
+    setPrompt((current) => {
+      const before = current.slice(0, agentMentionStart);
+      const after = current.slice(agentMentionStart + (agentQuery?.length ?? 0) + 1);
+      return `${before}${after}`.replace(/\s{2,}/g, " ").trimStart();
+    });
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  }
 
   async function submit(text: string) {
     if (!text.trim() || submitting || !selectedAgent) return;
@@ -408,77 +578,57 @@ function CabinetTaskComposer({
 
   const placeholder = selectedAgent
     ? `What should ${selectedAgent.name} work on?`
-    : "Select an agent above…";
+    : "Choose an agent and describe the next task.";
 
   return (
-    <div className="rounded-xl border border-border bg-card px-5 py-5">
-      {/* Heading */}
-      <p className="mb-4 text-sm font-semibold text-foreground">
-        What are we working on in{" "}
-        <span className="text-muted-foreground font-normal">{cabinetName}</span>?
-      </p>
-
-      {/* Agent selector */}
-      <div className="mb-4 flex flex-col gap-2">
-        {/* Own cabinet agents */}
-        {ownAgents.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {ownAgents.map((agent) => (
-              <button
-                key={agent.scopedId}
-                onClick={() => {
-                  setSelectedAgent(agent);
-                  textareaRef.current?.focus();
-                }}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-all",
-                  selectedAgent?.scopedId === agent.scopedId
-                    ? "border-primary bg-primary text-primary-foreground font-medium shadow-sm"
-                    : "border-border bg-background text-foreground hover:border-border/80 hover:bg-muted/50"
-                )}
-              >
-                <span className="text-base leading-none">{agent.emoji}</span>
-                {agent.name}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Child cabinet agents grouped by cabinet */}
-        {Object.entries(childAgentGroups).map(([groupName, groupAgents]) => (
-          <div key={groupName} className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/60 pr-1">
-              {groupName}
-            </span>
-            {groupAgents.map((agent) => (
-              <button
-                key={agent.scopedId}
-                onClick={() => {
-                  setSelectedAgent(agent);
-                  textareaRef.current?.focus();
-                }}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-all",
-                  selectedAgent?.scopedId === agent.scopedId
-                    ? "border-primary bg-primary text-primary-foreground font-medium shadow-sm"
-                    : "border-border bg-background text-foreground hover:border-border/80 hover:bg-muted/50"
-                )}
-              >
-                <span className="text-base leading-none">{agent.emoji}</span>
-                {agent.name}
-              </button>
-            ))}
-          </div>
-        ))}
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground/60">
+          Mission board
+        </p>
+        <h1 className="font-body-serif text-[2.35rem] leading-[0.96] text-foreground sm:text-[3.15rem]">
+          {greeting}, {displayName}.
+          <br />
+          What are we working on today?
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Working inside {cabinetName}
+        </p>
       </div>
 
-      {/* Textarea + send */}
-      <div className="relative">
+      <div className="relative overflow-hidden rounded-[22px] border border-border/80 bg-background">
         <textarea
           ref={textareaRef}
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
+          onChange={(e) =>
+            handlePromptChange(e.target.value, e.target.selectionStart || e.target.value.length)
+          }
           onKeyDown={(e) => {
+            if (agentQuery !== null && filteredAgents.length > 0) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setAgentIndex((current) => (current + 1) % filteredAgents.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setAgentIndex((current) =>
+                  current === 0 ? filteredAgents.length - 1 : current - 1
+                );
+                return;
+              }
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                const agent = filteredAgents[agentIndex];
+                if (agent) assignAgent(agent);
+                return;
+              }
+              if (e.key === "Escape") {
+                setAgentQuery(null);
+                return;
+              }
+            }
+
             if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
               e.preventDefault();
               void submit(prompt);
@@ -489,36 +639,87 @@ function CabinetTaskComposer({
           }}
           placeholder={placeholder}
           disabled={submitting || !selectedAgent}
-          rows={1}
+          rows={3}
           className={cn(
-            "w-full resize-none rounded-lg border border-border bg-background px-4 py-3 pr-12",
-            "text-sm text-foreground placeholder:text-muted-foreground",
-            "focus:outline-none focus:ring-2 focus:ring-ring",
-            "shadow-sm transition-shadow",
+            "min-h-[180px] w-full resize-none bg-transparent px-5 py-5 text-[1.05rem] leading-8 text-foreground outline-none placeholder:text-muted-foreground sm:px-6 sm:py-6",
             (!selectedAgent || submitting) && "opacity-60"
           )}
         />
-        <button
-          onClick={() => void submit(prompt)}
-          disabled={!prompt.trim() || submitting || !selectedAgent}
-          className={cn(
-            "absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-md transition-colors",
-            prompt.trim() && !submitting && selectedAgent
-              ? "bg-primary text-primary-foreground hover:bg-primary/90"
-              : "bg-muted text-muted-foreground"
-          )}
-        >
-          {submitting ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Zap className="h-3.5 w-3.5" />
-          )}
-        </button>
-      </div>
 
-      <p className="mt-2 text-[10px] text-muted-foreground/60">
-        Enter to send · ⌘↵ new line
-      </p>
+        {agentQuery !== null ? (
+          <div className="absolute inset-x-4 bottom-[4.5rem] z-20 rounded-2xl border border-border bg-popover shadow-lg">
+            {filteredAgents.length > 0 ? (
+              <div className="py-1.5">
+                {filteredAgents.slice(0, 6).map((agent, index) => (
+                  <button
+                    key={agent.scopedId}
+                    type="button"
+                    onClick={() => assignAgent(agent)}
+                    className={cn(
+                      "flex w-full items-center gap-3 px-3 py-2 text-left transition-colors",
+                      index === agentIndex ? "bg-muted/70" : "hover:bg-muted/40"
+                    )}
+                  >
+                    <span className="text-base leading-none">{agent.emoji || "🤖"}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">{agent.name}</p>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {agent.role}
+                        {agent.inherited ? ` · ${agent.cabinetName}` : ""}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="px-3 py-2 text-xs text-muted-foreground">
+                No visible agents match that name yet.
+              </p>
+            )}
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-between gap-3 border-t border-border/70 px-4 py-3 sm:px-5">
+          <div className="inline-flex min-w-0 items-center gap-2 rounded-full border border-border bg-muted/15 px-3 py-1.5">
+            {selectedAgent ? (
+              <span className="text-sm leading-none">{selectedAgent.emoji || "🤖"}</span>
+            ) : null}
+            <select
+              value={selectedAgent?.scopedId || ""}
+              onChange={(event) => {
+                const agent = assignableAgents.find((entry) => entry.scopedId === event.target.value) || null;
+                setSelectedAgent(agent);
+              }}
+              disabled={assignableAgents.length === 0}
+              className="max-w-[220px] truncate bg-transparent text-sm font-medium text-foreground outline-none"
+            >
+              {assignableAgents.length === 0 ? (
+                <option value="">No visible agents</option>
+              ) : (
+                assignableAgents.map((agent) => (
+                  <option key={agent.scopedId} value={agent.scopedId}>
+                    {agent.name}
+                    {agent.inherited ? ` · ${agent.cabinetName}` : ""}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+
+          <Button
+            onClick={() => void submit(prompt)}
+            disabled={!prompt.trim() || submitting || !selectedAgent}
+            className="h-11 w-11 rounded-full p-0"
+            aria-label="Start conversation"
+          >
+            {submitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -529,11 +730,13 @@ function RecentConversations({
   visibilityMode,
   agents,
   onOpen,
+  onOpenWorkspace,
 }: {
   cabinetPath: string;
   visibilityMode: string;
   agents: { slug: string; emoji: string; name: string; cabinetPath?: string }[];
   onOpen: (conv: ConversationMeta) => void;
+  onOpenWorkspace: () => void;
 }) {
   const [conversations, setConversations] = useState<ConversationMeta[]>([]);
   const [loading, setLoading] = useState(true);
@@ -569,52 +772,63 @@ function RecentConversations({
   const hasRunning = conversations.some((c) => c.status === "running");
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2.5">
-          <MessageSquare className="h-4 w-4 text-muted-foreground" />
-          <div>
-            <p className="text-sm font-semibold">Recent Conversations</p>
-            <p className="text-xs text-muted-foreground">
-              {loading ? "Loading…" : `${conversations.length} conversations`}
-              {hasRunning && (
-                <span className="ml-2 inline-flex items-center gap-1 text-primary">
-                  <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse inline-block" />
-                  {conversations.filter((c) => c.status === "running").length} running
-                </span>
-              )}
-            </p>
+    <div className="space-y-4">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/65">
+            Live activity
+          </p>
+          <div className="mt-2 flex items-center gap-2.5">
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+            <div>
+              <h2 className="text-[1.65rem] font-semibold tracking-tight text-foreground">
+                Last conversations
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {loading ? "Loading…" : `${conversations.length} conversations`}
+                {hasRunning ? (
+                  <span className="ml-2 inline-flex items-center gap-1 text-primary">
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                    {conversations.filter((c) => c.status === "running").length} running
+                  </span>
+                ) : null}
+              </p>
+            </div>
           </div>
         </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 gap-2 text-xs"
+          onClick={onOpenWorkspace}
+        >
+          <Users className="h-3.5 w-3.5" />
+          Open conversations
+        </Button>
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 px-4 py-4 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 border-t border-border/70 py-4 text-sm text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading conversations…
         </div>
       ) : conversations.length === 0 ? (
-        <p className="px-4 py-4 text-xs text-muted-foreground">
+        <p className="border-t border-border/70 py-4 text-sm text-muted-foreground">
           No conversations yet. Run a heartbeat or send a task to an agent.
         </p>
       ) : (
-        <div className="divide-y divide-border/50">
+        <div className="border-t border-border/70">
           {conversations.map((conv) => {
             const agent = agentBySlug.get(conv.agentSlug);
             return (
               <button
                 key={conv.id}
                 onClick={() => onOpen(conv)}
-                className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+                className="flex w-full items-center gap-3 border-b border-border/60 py-3 text-left transition-colors hover:bg-muted/20"
               >
-                {/* Status */}
                 <StatusIcon status={conv.status} />
-
-                {/* Agent */}
                 <span className="shrink-0 text-base leading-none" title={agent?.name || conv.agentSlug}>
                   {agent?.emoji || "🤖"}
                 </span>
-
-                {/* Title + meta */}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium leading-snug">{conv.title}</p>
                   <p className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -622,8 +836,6 @@ function RecentConversations({
                     {conv.summary ? ` · ${conv.summary}` : ""}
                   </p>
                 </div>
-
-                {/* Trigger pill */}
                 <span
                   className={cn(
                     "shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
@@ -634,8 +846,6 @@ function RecentConversations({
                   <TriggerIcon trigger={conv.trigger} />
                   {TRIGGER_LABELS[conv.trigger]}
                 </span>
-
-                {/* Time */}
                 <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
                   {formatRelative(conv.startedAt)}
                 </span>
@@ -653,6 +863,7 @@ export function CabinetView({ cabinetPath }: { cabinetPath: string }) {
   const [overview, setOverview] = useState<CabinetOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState("");
   const selectPage = useTreeStore((state) => state.selectPage);
   const loadPage = useEditorStore((state) => state.loadPage);
   const setSection = useAppStore((state) => state.setSection);
@@ -695,6 +906,21 @@ export function CabinetView({ cabinetPath }: { cabinetPath: string }) {
     });
   }, [cabinetPath, setSection]);
 
+  const openConversation = useCallback(
+    (conversation: ConversationMeta) => {
+      const targetCabinetPath = conversation.cabinetPath || cabinetPath;
+      setSection({
+        type: "agent",
+        mode: "cabinet",
+        slug: conversation.agentSlug,
+        cabinetPath: targetCabinetPath,
+        agentScopedId: `${targetCabinetPath}::agent::${conversation.agentSlug}`,
+        conversationId: conversation.id,
+      });
+    },
+    [cabinetPath, setSection]
+  );
+
   const loadOverview = useCallback(async () => {
     setLoading(true);
     try {
@@ -725,6 +951,23 @@ export function CabinetView({ cabinetPath }: { cabinetPath: string }) {
     };
   }, [loadOverview]);
 
+  useEffect(() => {
+    fetch("/api/agents/config")
+      .then((response) => response.json())
+      .then((data) => {
+        const nextName = [
+          data?.person?.name,
+          data?.user?.name,
+          data?.owner?.name,
+          data?.company?.name,
+          typeof data?.company === "string" ? data.company : null,
+        ].find((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+        if (nextName) setDisplayName(nextName);
+      })
+      .catch(() => {});
+  }, []);
+
   const cabinetName =
     overview?.cabinet.name ||
     cabinetPath.split("/").filter(Boolean).pop()?.replace(/-/g, " ") ||
@@ -732,156 +975,202 @@ export function CabinetView({ cabinetPath }: { cabinetPath: string }) {
   const cabinetDescription =
     overview?.cabinet.description ||
     "Portable software layer for agents, jobs, and knowledge.";
+  const visibleAgentCount = overview?.agents.length ?? 0;
   const activeAgents = overview?.agents.filter((a) => a.active).length ?? 0;
+  const totalTaskCount = overview?.agents.reduce((sum, agent) => sum + agent.taskCount, 0) ?? 0;
+  const totalJobCount = overview?.jobs.length ?? 0;
   const heartbeatCount = overview?.agents.filter((a) => Boolean(a.heartbeat)).length ?? 0;
   const childCabinetCount = overview?.children.length ?? 0;
   const visibleCabinetCount = overview?.visibleCabinets.length ?? 0;
   const cabinetPathLabel = cabinetPath === "." ? "/" : `/${cabinetPath}`;
+  const boardName = displayName || "there";
+  const scopeLabel =
+    CABINET_VISIBILITY_OPTIONS.find((option) => option.value === cabinetVisibilityMode)?.label ||
+    "Own agents only";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {/* Toolbar */}
       <div className="border-b border-border/70 bg-background/95 px-4 py-3 sm:px-6">
-        <div className="flex items-center justify-end gap-1">
-          <VersionHistory />
-          <HeaderActions />
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            {overview?.parent ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => openCabinet(overview.parent!.path)}
+                className="h-8 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back to {overview.parent.name}
+              </Button>
+            ) : null}
+            <div className={cn("hidden h-5 w-px bg-border/80 sm:block", !overview?.parent && "sm:hidden")} />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">{cabinetName}</p>
+              <p className="truncate text-[11px] text-muted-foreground">{cabinetPathLabel}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <VersionHistory />
+            <HeaderActions />
+          </div>
         </div>
       </div>
 
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 space-y-6">
-          <div className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
-            <div className="h-24 bg-gradient-to-r from-primary/14 via-primary/8 to-transparent sm:h-28" />
-            <div className="-mt-8 px-5 pb-5 sm:px-6 sm:pb-6">
-              <div className="space-y-4">
-                {overview?.parent ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => openCabinet(overview.parent!.path)}
-                    className="-ml-2 h-8 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    <ArrowLeft className="h-3.5 w-3.5" />
-                    Back to {overview.parent.name}
-                  </Button>
-                ) : null}
-
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="min-w-0 space-y-3">
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-border bg-background shadow-sm">
-                        <Archive className="h-6 w-6 text-primary" />
-                      </div>
-                      <div className="min-w-0 space-y-2">
-                        <span className="inline-flex rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
-                          {overview?.cabinet.kind || "cabinet"}
-                        </span>
-                        <div>
-                          <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-[2.45rem]">
-                            {cabinetName}
-                          </h1>
-                          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                            {cabinetDescription}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatPill value={overview?.agents.length ?? 0} label="agents" />
-                      <StatPill value={activeAgents} label="active" highlight />
-                      <StatPill value={overview?.jobs.length ?? 0} label="jobs" />
-                      <StatPill value={heartbeatCount} label="heartbeats" />
-                      <StatPill value={childCabinetCount} label="child cabinets" />
-                      <StatPill value={visibleCabinetCount} label="visible cabinets" />
-                      <span className="rounded-full bg-muted px-3 py-1 font-mono text-[11px] text-muted-foreground">
-                        {cabinetPathLabel}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="shrink-0 space-y-3 xl:min-w-[260px]">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                        Visible Agent Scope
-                      </p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {CABINET_VISIBILITY_OPTIONS.find((option) => option.value === cabinetVisibilityMode)?.label ||
-                          "Own agents only"}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {CABINET_VISIBILITY_OPTIONS.map((option) => (
-                        <button
-                          key={option.value}
-                          onClick={() => setCabinetVisibilityMode(cabinetPath, option.value)}
-                          className={cn(
-                            "rounded-full border px-3 py-1.5 text-xs font-medium transition-all",
-                            cabinetVisibilityMode === option.value
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "border-border bg-background text-muted-foreground hover:text-foreground"
-                          )}
-                        >
-                          {option.shortLabel}
-                        </button>
-                      ))}
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9 w-full justify-start gap-2"
-                      onClick={openCabinetAgentsWorkspace}
-                    >
-                      <Users className="h-4 w-4" />
-                      Open Agents Workspace
-                    </Button>
-                  </div>
-                </div>
-              </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="mx-auto w-full max-w-7xl px-4 pb-12 pt-8 sm:px-6 lg:px-8">
+          {error ? (
+            <div className="mb-8 border-b border-destructive/20 pb-4 text-sm text-destructive">
+              {error}
             </div>
-          </div>
+          ) : null}
 
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-border bg-card">
-              <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
-                <Bot className="h-4 w-4 text-muted-foreground" />
+          <section className="border-b border-border/70 pb-10">
+            <div className="grid gap-8 xl:grid-cols-[minmax(0,1.1fr)_320px]">
+              <CabinetTaskComposer
+                cabinetPath={cabinetPath}
+                agents={overview?.agents || []}
+                displayName={boardName}
+                cabinetName={cabinetName}
+                onNavigate={(agentSlug, agentCabinetPath, conversationId) =>
+                  setSection({
+                    type: "agent",
+                    mode: "cabinet",
+                    slug: agentSlug,
+                    cabinetPath: agentCabinetPath,
+                    agentScopedId: `${agentCabinetPath}::agent::${agentSlug}`,
+                    conversationId,
+                  })
+                }
+              />
+
+              <div className="space-y-8 xl:pt-6">
                 <div>
-                  <p className="text-sm font-semibold">Cabinet Notes</p>
-                  <p className="text-xs text-muted-foreground">
-                    Showing this cabinet&apos;s index page for now
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/65">
+                    Cabinet
+                  </p>
+                  <h2 className="mt-2 font-body-serif text-[2.2rem] leading-none tracking-tight text-foreground">
+                    {cabinetName}
+                  </h2>
+                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                    {cabinetDescription}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-x-8 gap-y-4">
+                  <StatPill value={visibleAgentCount} label="visible agents" />
+                  <StatPill value={activeAgents} label="active" highlight />
+                  <StatPill value={totalTaskCount} label="tasks" />
+                  <StatPill value={totalJobCount} label="jobs" />
+                  <StatPill value={heartbeatCount} label="heartbeats" />
+                  <StatPill value={visibleCabinetCount} label="cabinets in view" />
+                </div>
+
+                <div className="space-y-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/65">
+                    Visible agent scope
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {CABINET_VISIBILITY_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        onClick={() => setCabinetVisibilityMode(cabinetPath, option.value)}
+                        className={cn(
+                          "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                          cabinetVisibilityMode === option.value
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border bg-background text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        {option.shortLabel}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {scopeLabel}. {childCabinetCount} child cabinet{childCabinetCount === 1 ? "" : "s"} beneath this one.
                   </p>
                 </div>
               </div>
-              <KBEditor />
+            </div>
+          </section>
+
+          <section className="border-b border-border/70 py-8">
+            <RecentConversations
+              cabinetPath={cabinetPath}
+              visibilityMode={cabinetVisibilityMode}
+              agents={(overview?.agents || []).map((agent) => ({
+                slug: agent.slug,
+                emoji: agent.emoji,
+                name: agent.name,
+                cabinetPath: agent.cabinetPath,
+              }))}
+              onOpen={openConversation}
+              onOpenWorkspace={openCabinetAgentsWorkspace}
+            />
+          </section>
+
+          <section className="border-b border-border/70 py-10">
+            <div className="mb-6 flex items-end justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/65">
+                  Team graph
+                </p>
+                <h2 className="mt-2 text-[1.8rem] font-semibold tracking-tight text-foreground">
+                  Cabinet team
+                </h2>
+              </div>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-2 text-xs"
+                onClick={openCabinetAgentsWorkspace}
+              >
+                <Users className="h-3.5 w-3.5" />
+                Open agents workspace
+              </Button>
             </div>
 
-            <div className="flex flex-col gap-4">
-              {loading && !overview ? (
-                <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-card py-16 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading overview…
-                </div>
-              ) : error && !overview ? (
-                <div className="rounded-xl border border-destructive/20 bg-card px-4 py-3 text-sm text-destructive">
-                  {error}
-                </div>
-              ) : overview ? (
-                <>
-                  <CompactOrgChart
-                    cabinetName={cabinetName}
-                    agents={overview.agents}
-                    onAgentClick={openCabinetAgent}
-                  />
-                  <SchedulesPanel
-                    cabinetPath={cabinetPath}
-                    agents={overview.agents}
-                    jobs={overview.jobs}
-                  />
-                </>
-              ) : null}
-            </div>
-          </div>
+            {loading && !overview ? (
+              <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading mission board…
+              </div>
+            ) : overview ? (
+              <CompactOrgChart
+                cabinetName={cabinetName}
+                agents={overview.agents}
+                jobs={overview.jobs}
+                children={overview.children}
+                onAgentClick={openCabinetAgent}
+              />
+            ) : null}
+          </section>
 
+          <section className="grid gap-10 py-10 xl:grid-cols-[320px_minmax(0,1fr)]">
+            <SchedulesPanel
+              agents={overview?.agents || []}
+              jobs={overview?.jobs || []}
+            />
+
+            <div className="min-w-0">
+              <div className="border-b border-border/70 pb-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/65">
+                  Cabinet notes
+                </p>
+                <h2 className="mt-2 text-[1.8rem] font-semibold tracking-tight text-foreground">
+                  Living brief
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Decisions, working context, and mission notes for {cabinetName}.
+                </p>
+              </div>
+              <div className="min-h-[680px]">
+                <KBEditor />
+              </div>
+            </div>
+          </section>
         </div>
       </ScrollArea>
     </div>
