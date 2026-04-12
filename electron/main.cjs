@@ -181,6 +181,48 @@ function ensureManagedData() {
   seedDefaultContent();
 }
 
+async function startMulticaServer() {
+  let binaryPath;
+
+  if (isDev) {
+    binaryPath = process.env.MULTICA_SERVER_PATH || path.resolve(__dirname, "..", "..", "multica", "server", "bin", "server");
+  } else {
+    binaryPath = path.join(process.resourcesPath, "multica-server");
+  }
+
+  if (!fs.existsSync(binaryPath)) {
+    console.log(`[multica] Binary not found at ${binaryPath} — multica features will be offline`);
+    return null;
+  }
+
+  const multicaPort = await getFreePort();
+  const multicaDbDir = path.join(app.getPath("userData"), "multica-db");
+  fs.mkdirSync(multicaDbDir, { recursive: true });
+
+  console.log(`[multica] Starting server on port ${multicaPort} (binary: ${binaryPath})`);
+
+  const child = spawnBackend(binaryPath, [], {
+    ...process.env,
+    PORT: String(multicaPort),
+    MULTICA_EMBEDDED_DB: "true",
+    MULTICA_EMBEDDED_DB_DIR: multicaDbDir,
+  });
+
+  child.on("exit", (code, signal) => {
+    console.log(`[multica] Server exited (code=${code}, signal=${signal})`);
+  });
+
+  try {
+    await waitForHealth(`http://127.0.0.1:${multicaPort}/api/health`, 30_000);
+    console.log(`[multica] Server is ready on port ${multicaPort}`);
+    return multicaPort;
+  } catch (err) {
+    console.error(`[multica] Server failed to become healthy: ${err.message}`);
+    child.kill("SIGTERM");
+    return null;
+  }
+}
+
 async function startEmbeddedCabinet() {
   if (isDev) {
     return {
@@ -317,6 +359,14 @@ function cleanupBackends() {
 }
 
 async function createWindow() {
+  // Start multica first so its URL can be passed to Cabinet's environment
+  const multicaPort = await startMulticaServer();
+  if (multicaPort) {
+    const multicaUrl = `http://127.0.0.1:${multicaPort}`;
+    process.env.MULTICA_API_URL = multicaUrl;
+    console.log(`[multica] MULTICA_API_URL set to ${multicaUrl}`);
+  }
+
   const runtime = await startEmbeddedCabinet();
 
   mainWindow = new BrowserWindow({
