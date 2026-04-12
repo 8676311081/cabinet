@@ -37,6 +37,7 @@ import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 import { UpdateDialog } from "@/components/layout/update-dialog";
 import { NotificationToasts } from "@/components/layout/notification-toasts";
 import { MulticaModals } from "@/components/integrations/multica-modals";
+import { MulticaAuthGuard } from "@/components/integrations/multica-auth-guard";
 import { useCabinetUpdate } from "@/hooks/use-cabinet-update";
 import { useHashRoute } from "@/hooks/use-hash-route";
 import { useTreeStore } from "@/stores/tree-store";
@@ -210,21 +211,21 @@ export function AppShell() {
       );
     }
     if (section.type === "jobs") return <JobsManager />;
-    if (section.type === "inbox") return <InboxPage />;
-    if (section.type === "my-issues") return <MyIssuesPage />;
-    if (section.type === "issues") return <IssuesPage />;
+    if (section.type === "inbox") return <MulticaAuthGuard><InboxPage /></MulticaAuthGuard>;
+    if (section.type === "my-issues") return <MulticaAuthGuard><MyIssuesPage /></MulticaAuthGuard>;
+    if (section.type === "issues") return <MulticaAuthGuard><IssuesPage /></MulticaAuthGuard>;
     if (section.type === "issue-detail") {
-      return section.id ? <IssueDetail issueId={section.id} /> : <IssuesPage />;
+      return <MulticaAuthGuard>{section.id ? <IssueDetail issueId={section.id} /> : <IssuesPage />}</MulticaAuthGuard>;
     }
-    if (section.type === "projects") return <ProjectsPage />;
+    if (section.type === "projects") return <MulticaAuthGuard><ProjectsPage /></MulticaAuthGuard>;
     if (section.type === "project-detail") {
-      return section.id ? <ProjectDetail projectId={section.id} /> : <ProjectsPage />;
+      return <MulticaAuthGuard>{section.id ? <ProjectDetail projectId={section.id} /> : <ProjectsPage />}</MulticaAuthGuard>;
     }
-    if (section.type === "agents-multica") return <MulticaAgentsPage />;
-    if (section.type === "agent-multica") return <MulticaAgentsPage />;
-    if (section.type === "runtimes") return <RuntimesPage />;
-    if (section.type === "skills") return <SkillsPage />;
-    if (section.type === "multica-settings") return <MulticaSettingsPage />;
+    if (section.type === "agents-multica") return <MulticaAuthGuard><MulticaAgentsPage /></MulticaAuthGuard>;
+    if (section.type === "agent-multica") return <MulticaAuthGuard><MulticaAgentsPage /></MulticaAuthGuard>;
+    if (section.type === "runtimes") return <MulticaAuthGuard><RuntimesPage /></MulticaAuthGuard>;
+    if (section.type === "skills") return <MulticaAuthGuard><SkillsPage /></MulticaAuthGuard>;
+    if (section.type === "multica-settings") return <MulticaAuthGuard><MulticaSettingsPage /></MulticaAuthGuard>;
 
     // Page-based views (when a KB page is selected)
     if (isApp && selectedNode) {
