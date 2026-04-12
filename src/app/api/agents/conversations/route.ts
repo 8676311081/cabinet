@@ -4,6 +4,7 @@ import {
   buildManualConversationPrompt,
   startConversationRun,
 } from "@/lib/agents/conversation-runner";
+import { buildConversationInstanceKey } from "@/lib/agents/conversation-identity";
 import { listConversationMetas } from "@/lib/agents/conversation-store";
 import { readMemory, writeMemory } from "@/lib/agents/persona-manager";
 import { readCabinetOverview } from "@/lib/cabinets/overview";
@@ -47,7 +48,15 @@ export async function GET(req: NextRequest) {
         visiblePaths.map((cp) => listConversationMetas({ ...filters, cabinetPath: cp }))
       );
 
-      const merged = all.flat();
+      const deduped = new Map<string, (typeof all)[number][number]>();
+      for (const conversation of all.flat()) {
+        const key = buildConversationInstanceKey(conversation);
+        if (!deduped.has(key)) {
+          deduped.set(key, conversation);
+        }
+      }
+
+      const merged = Array.from(deduped.values());
       merged.sort(
         (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
       );

@@ -34,6 +34,10 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WebTerminal } from "@/components/terminal/web-terminal";
 import { ConversationResultView } from "@/components/agents/conversation-result-view";
+import {
+  appendConversationCabinetPath,
+  buildConversationInstanceKey,
+} from "@/lib/agents/conversation-identity";
 import { cronToHuman } from "@/lib/agents/cron-utils";
 import { SchedulePicker } from "@/components/mission-control/schedule-picker";
 import { useTreeStore } from "@/stores/tree-store";
@@ -105,7 +109,7 @@ const TASK_CARD_TRIGGER_STYLES: Record<ConversationMeta["trigger"], string> = {
 };
 
 const STATUS_TAG_STYLES: Record<string, string> = {
-  running: "bg-primary/10 text-primary ring-1 ring-primary/20",
+  running: "bg-emerald-500/12 text-emerald-500 ring-1 ring-emerald-500/20",
   completed: "bg-emerald-500/12 text-emerald-500 ring-1 ring-emerald-500/20",
   failed: "bg-destructive/12 text-destructive ring-1 ring-destructive/20",
   cancelled: "bg-muted text-muted-foreground ring-1 ring-border",
@@ -400,6 +404,9 @@ export function AgentsWorkspace({
     selectedScope === "agent" ? selectedAgentSlug || null : null
   );
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [selectedConversationCabinetPath, setSelectedConversationCabinetPath] = useState<
+    string | undefined
+  >(undefined);
   const [selectedConversation, setSelectedConversation] = useState<ConversationDetail | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget>(null);
   const [settingsPersona, setSettingsPersona] = useState<AgentListItem | null>(null);
@@ -441,7 +448,7 @@ export function AgentsWorkspace({
   const [savingSettings, setSavingSettings] = useState(false);
   const [savingJob, setSavingJob] = useState(false);
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
-  const [hoveredConvId, setHoveredConvId] = useState<string | null>(null);
+  const [hoveredConvKey, setHoveredConvKey] = useState<string | null>(null);
   const [quickSendAgent, setQuickSendAgent] = useState<string | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [runningJobId, setRunningJobId] = useState<string | null>(null);
@@ -589,15 +596,36 @@ export function AgentsWorkspace({
     }
   }
 
-  async function deleteConversation(id: string) {
+  async function deleteConversation(id: string, cabinetPath?: string) {
     try {
-      const response = await fetch(`/api/agents/conversations/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      });
+      const target = conversations.find(
+        (conversation) =>
+          conversation.id === id &&
+          (conversation.cabinetPath || "") === (cabinetPath || "")
+      );
+      const response = await fetch(
+        appendConversationCabinetPath(
+          `/api/agents/conversations/${encodeURIComponent(id)}`,
+          target?.cabinetPath
+        ),
+        { method: "DELETE" }
+      );
       if (!response.ok) return;
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      if (selectedConversationId === id) {
+      setConversations((prev) =>
+        prev.filter(
+          (conversation) =>
+            !(
+              conversation.id === id &&
+              (conversation.cabinetPath || "") === (target?.cabinetPath || "")
+            )
+        )
+      );
+      if (
+        selectedConversationId === id &&
+        (selectedConversationCabinetPath || "") === (target?.cabinetPath || "")
+      ) {
         setSelectedConversationId(null);
+        setSelectedConversationCabinetPath(undefined);
         setSelectedConversation(null);
         setMode("composer");
       }
@@ -684,8 +712,16 @@ export function AgentsWorkspace({
     }
   }
 
-  async function refreshSelectedConversation(conversationId: string) {
-    const response = await fetch(`/api/agents/conversations/${conversationId}`);
+  async function refreshSelectedConversation(
+    conversationId: string,
+    cabinetPath?: string
+  ) {
+    const response = await fetch(
+      appendConversationCabinetPath(
+        `/api/agents/conversations/${conversationId}`,
+        cabinetPath
+      )
+    );
     if (!response.ok) return;
     const detail = (await response.json()) as ConversationDetail;
     setSelectedConversation(detail);
@@ -729,6 +765,7 @@ export function AgentsWorkspace({
     const pendingConvId = section.conversationId || null;
     setActiveAgentSlug(selectedScope === "agent" ? selectedAgentSlug || null : null);
     setSelectedConversationId(pendingConvId);
+    setSelectedConversationCabinetPath(pendingConvId ? section.cabinetPath : undefined);
     setSelectedConversation(null);
     setSettingsTarget(selectedScope === "agent" ? selectedAgentSlug || null : null);
     setHasLoadedConversations(false);
@@ -738,7 +775,7 @@ export function AgentsWorkspace({
     } else {
       setMode(selectedScope === "agent" && selectedAgentSlug ? "settings" : "composer");
     }
-  }, [selectedAgentSlug, selectedScope, section.conversationId]);
+  }, [section.cabinetPath, section.conversationId, selectedAgentSlug, selectedScope]);
 
   function buildAgentSection(agentSlug: string, agentCabinetPath?: string) {
     if (agentCabinetPath) {
@@ -780,6 +817,7 @@ export function AgentsWorkspace({
 
     setActiveAgentSlug(agentSlug);
     setSelectedConversationId(null);
+    setSelectedConversationCabinetPath(undefined);
     setSelectedConversation(null);
     setSettingsTarget(agentSlug);
     setMode("settings");
@@ -807,6 +845,7 @@ export function AgentsWorkspace({
       setActiveAgentSlug(agentSlug);
       setSettingsTarget(agentSlug);
       setSelectedConversationId(conversationId);
+      setSelectedConversationCabinetPath(conversationCabinetPath);
       setMode("conversation");
       setSection(buildAgentSection(agentSlug, conversationCabinetPath));
       void refreshConversations();
@@ -906,11 +945,15 @@ export function AgentsWorkspace({
       setSelectedConversation(null);
       return;
     }
-    const current = conversations.find((conversation) => conversation.id === selectedConversationId);
+    const current = conversations.find(
+      (conversation) =>
+        conversation.id === selectedConversationId &&
+        (conversation.cabinetPath || "") === (selectedConversationCabinetPath || "")
+    );
     if (current && current.status !== "running") {
-      void refreshSelectedConversation(selectedConversationId);
+      void refreshSelectedConversation(selectedConversationId, current.cabinetPath);
     }
-  }, [selectedConversationId, conversations]);
+  }, [selectedConversationCabinetPath, selectedConversationId, conversations]);
 
   useEffect(() => {
     const handler = () => { openAddAgentDialog(); };
@@ -1106,6 +1149,7 @@ export function AgentsWorkspace({
       setActiveAgentSlug(targetAgentSlug);
       setSection(buildAgentSection(targetAgentSlug, effectiveCabinetPath));
       setSelectedConversationId(conversation.id);
+      setSelectedConversationCabinetPath(conversation.cabinetPath || effectiveCabinetPath);
       setMode("conversation");
       await refreshConversations();
     } finally {
@@ -1193,6 +1237,7 @@ export function AgentsWorkspace({
       setSection(buildAgentSection(settingsAgentSlug, effectiveCabinetPath));
       setSettingsTarget(null);
       setSelectedConversationId(data.sessionId as string);
+      setSelectedConversationCabinetPath(effectiveCabinetPath);
       setMode("conversation");
       await refreshConversations();
     }
@@ -1319,6 +1364,7 @@ export function AgentsWorkspace({
         setSection(buildAgentSection(settingsAgentSlug, effectiveCabinetPath));
         setSettingsTarget(null);
         setSelectedConversationId(data.run.id as string);
+        setSelectedConversationCabinetPath(effectiveCabinetPath);
         setMode("conversation");
         await refreshConversations();
       }
@@ -1411,6 +1457,7 @@ export function AgentsWorkspace({
         setSection(buildAgentsSection(effectiveCabinetPath));
       }
       setSelectedConversationId(null);
+      setSelectedConversationCabinetPath(undefined);
       setSelectedConversation(null);
       setSettingsTarget("directory");
       setSettingsPersona(null);
@@ -1427,7 +1474,9 @@ export function AgentsWorkspace({
   }
 
   const selectedConversationMeta = conversations.find(
-    (conversation) => conversation.id === selectedConversationId
+    (conversation) =>
+      conversation.id === selectedConversationId &&
+      (conversation.cabinetPath || "") === (selectedConversationCabinetPath || "")
   );
   const activeAgent = activeAgentSlug
     ? agents.find((agent) => agent.slug === activeAgentSlug) || null
@@ -1953,23 +2002,30 @@ export function AgentsWorkspace({
             ) : (
               conversations.map((conversation) => {
                 const agent = agents.find((entry) => entry.slug === conversation.agentSlug);
-                const isSelected = selectedConversationId === conversation.id;
+                const conversationKey = buildConversationInstanceKey(conversation);
+                const isSelected =
+                  selectedConversationId === conversation.id &&
+                  (selectedConversationCabinetPath || "") === (conversation.cabinetPath || "");
 
                 return (
                   <button
-                    key={conversation.id}
+                    key={conversationKey}
                     onClick={() => {
                       setSelectedConversationId(conversation.id);
+                      setSelectedConversationCabinetPath(conversation.cabinetPath);
                       setMode("conversation");
                     }}
                     onPointerEnter={() => {
                       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-                      hoverTimerRef.current = setTimeout(() => setHoveredConvId(conversation.id), 1000);
+                      hoverTimerRef.current = setTimeout(
+                        () => setHoveredConvKey(conversationKey),
+                        1000
+                      );
                     }}
                     onPointerLeave={() => {
                       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
                       hoverTimerRef.current = null;
-                      setHoveredConvId((prev) => prev === conversation.id ? null : prev);
+                      setHoveredConvKey((prev) => (prev === conversationKey ? null : prev));
                     }}
                     className={cn(
                       "relative flex w-full items-start gap-2 border-b border-border/70 px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
@@ -1985,7 +2041,7 @@ export function AgentsWorkspace({
                     />
                     <div className="mt-0.5 shrink-0">
                       {conversation.status === "running" ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />
                       ) : conversation.status === "failed" ? (
                         <XCircle className="h-3.5 w-3.5 text-destructive" />
                       ) : (
@@ -2005,17 +2061,17 @@ export function AgentsWorkspace({
                             title="Delete conversation"
                             onClick={(e) => {
                               e.stopPropagation();
-                              void deleteConversation(conversation.id);
+                              void deleteConversation(conversation.id, conversation.cabinetPath);
                             }}
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") {
                                 e.stopPropagation();
-                                void deleteConversation(conversation.id);
+                                void deleteConversation(conversation.id, conversation.cabinetPath);
                               }
                             }}
                             className={cn(
                               "inline-flex h-5.5 w-5.5 items-center justify-center rounded-full text-muted-foreground transition-opacity hover:text-destructive",
-                              hoveredConvId === conversation.id ? "opacity-100" : "opacity-0"
+                              hoveredConvKey === conversationKey ? "opacity-100" : "opacity-0"
                             )}
                           >
                             <Trash2 className="h-2.75 w-2.75" />
@@ -2140,7 +2196,12 @@ export function AgentsWorkspace({
                     variant="ghost"
                     size="sm"
                     className="h-7 gap-1 text-[11px] text-muted-foreground hover:text-destructive"
-                    onClick={() => void deleteConversation(selectedConversationMeta.id)}
+                    onClick={() =>
+                      void deleteConversation(
+                        selectedConversationMeta.id,
+                        selectedConversationMeta.cabinetPath
+                      )
+                    }
                   >
                     <Trash2 className="h-3 w-3" />
                     Delete

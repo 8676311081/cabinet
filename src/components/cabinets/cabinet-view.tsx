@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { buildConversationInstanceKey } from "@/lib/agents/conversation-identity";
 import { cronToHuman, cronToShortLabel } from "@/lib/agents/cron-utils";
 import { CABINET_VISIBILITY_OPTIONS } from "@/lib/cabinets/visibility";
 import { useEditorStore } from "@/stores/editor-store";
@@ -464,7 +465,7 @@ function TriggerIcon({ trigger }: { trigger: ConversationMeta["trigger"] }) {
 }
 
 function StatusIcon({ status }: { status: ConversationMeta["status"] }) {
-  if (status === "running") return <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />;
+  if (status === "running") return <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />;
   if (status === "completed") return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
   if (status === "failed") return <XCircle className="h-3.5 w-3.5 text-destructive" />;
   return <XCircle className="h-3.5 w-3.5 text-muted-foreground/40" />;
@@ -835,8 +836,8 @@ function RecentConversations({
               <p className="text-sm text-muted-foreground">
                 {loading ? "Loading…" : `${conversations.length} conversations`}
                 {hasRunning ? (
-                  <span className="ml-2 inline-flex items-center gap-1 text-primary">
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                  <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     {conversations.filter((c) => c.status === "running").length} running
                   </span>
                 ) : null}
@@ -869,7 +870,7 @@ function RecentConversations({
             const agent = agentBySlug.get(conv.agentSlug);
             return (
               <button
-                key={conv.id}
+                key={buildConversationInstanceKey(conv)}
                 onClick={() => onOpen(conv)}
                 className="flex w-full items-center gap-3 border-b border-border/60 py-3 text-left transition-colors hover:bg-muted/20"
               >
@@ -1156,6 +1157,9 @@ export function CabinetView({ cabinetPath }: { cabinetPath: string }) {
                   </div>
 
                   <div className="space-y-3 xl:justify-self-end xl:pb-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/65">
+                      Visibility depth
+                    </p>
                     <div className="flex flex-wrap gap-2">
                       {CABINET_VISIBILITY_OPTIONS.map((option) => (
                         <button
@@ -1178,7 +1182,9 @@ export function CabinetView({ cabinetPath }: { cabinetPath: string }) {
                   </div>
                 </div>
 
-                <div className="border-t border-border/70 pt-10">
+                <div className="h-px w-full bg-border/80" />
+
+                <div className="pt-1">
                   <CabinetTaskComposer
                     cabinetPath={cabinetPath}
                     agents={overview?.agents || []}

@@ -36,11 +36,14 @@ function Field({
 
 export default async function ConversationTranscriptPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ cabinetPath?: string }>;
 }) {
   const { id } = await params;
-  const detail = await readConversationDetail(id);
+  const { cabinetPath } = await searchParams;
+  const detail = await readConversationDetail(id, cabinetPath);
 
   if (!detail) {
     notFound();

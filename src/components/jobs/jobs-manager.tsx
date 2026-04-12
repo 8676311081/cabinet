@@ -16,6 +16,10 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WebTerminal } from "@/components/terminal/web-terminal";
 import { ConversationResultView } from "@/components/agents/conversation-result-view";
+import {
+  appendConversationCabinetPath,
+  buildConversationInstanceKey,
+} from "@/lib/agents/conversation-identity";
 import { cronToHuman } from "@/lib/agents/cron-utils";
 import { useTreeStore } from "@/stores/tree-store";
 import { useAppStore } from "@/stores/app-store";
@@ -132,6 +136,9 @@ export function JobsManager({
   const [libraryTemplates, setLibraryTemplates] = useState<JobLibraryTemplate[]>([]);
   const [conversations, setConversations] = useState<ConversationMeta[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [selectedConversationCabinetPath, setSelectedConversationCabinetPath] = useState<
+    string | undefined
+  >(undefined);
   const [selectedConversation, setSelectedConversation] = useState<ConversationDetail | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [mode, setMode] = useState<MainPanelMode>("settings");
@@ -233,7 +240,12 @@ export function JobsManager({
       setSelectedConversation(null);
       return;
     }
-    const response = await fetch(`/api/agents/conversations/${conversationId}`);
+    const response = await fetch(
+      appendConversationCabinetPath(
+        `/api/agents/conversations/${conversationId}`,
+        selectedConversationCabinetPath
+      )
+    );
     if (!response.ok) return;
     setSelectedConversation((await response.json()) as ConversationDetail);
   }
@@ -254,6 +266,7 @@ export function JobsManager({
     void refreshSelectedAgent(selectedAgentSlug);
     setMode("settings");
     setSelectedConversationId(null);
+    setSelectedConversationCabinetPath(undefined);
     setSelectedConversation(null);
   }, [effectiveCabinetPath, selectedAgentSlug]);
 
@@ -268,6 +281,7 @@ export function JobsManager({
     setSelectedJobId(null);
     setJobDraft(null);
     setSelectedConversationId(null);
+    setSelectedConversationCabinetPath(undefined);
     setSelectedConversation(null);
     setMode("settings");
   }, [effectiveCabinetPath]);
@@ -283,7 +297,7 @@ export function JobsManager({
   useEffect(() => {
     if (!selectedConversationId) return;
     void loadConversationDetail(selectedConversationId);
-  }, [selectedConversationId]);
+  }, [selectedConversationCabinetPath, selectedConversationId]);
 
   useEffect(() => {
     if (!selectedJobId) {
@@ -305,7 +319,9 @@ export function JobsManager({
   }, [jobs, selectedAgentSlug, selectedJobId]);
 
   const selectedConversationMeta = conversations.find(
-    (conversation) => conversation.id === selectedConversationId
+    (conversation) =>
+      conversation.id === selectedConversationId &&
+      (conversation.cabinetPath || "") === (selectedConversationCabinetPath || "")
   );
 
   async function saveHeartbeat() {
@@ -337,6 +353,7 @@ export function JobsManager({
       const data = await response.json();
       if (data.sessionId) {
         setSelectedConversationId(data.sessionId as string);
+        setSelectedConversationCabinetPath(effectiveCabinetPath);
         setMode("conversation");
         await refreshConversations();
       }
@@ -417,6 +434,7 @@ export function JobsManager({
       const data = await response.json();
       if (data.run?.id) {
         setSelectedConversationId(data.run.id as string);
+        setSelectedConversationCabinetPath(effectiveCabinetPath);
         setMode("conversation");
         await refreshConversations();
       }
@@ -548,14 +566,18 @@ export function JobsManager({
           ) : (
             <div>
               {conversations.map((conversation) => {
-                const isSelected = selectedConversationId === conversation.id;
+                const conversationKey = buildConversationInstanceKey(conversation);
+                const isSelected =
+                  selectedConversationId === conversation.id &&
+                  (selectedConversationCabinetPath || "") === (conversation.cabinetPath || "");
                 const agent = agents.find((entry) => entry.slug === conversation.agentSlug);
 
                 return (
                   <button
-                    key={conversation.id}
+                    key={conversationKey}
                     onClick={() => {
                       setSelectedConversationId(conversation.id);
+                      setSelectedConversationCabinetPath(conversation.cabinetPath);
                       setMode("conversation");
                     }}
                     className={cn(
@@ -617,6 +639,7 @@ export function JobsManager({
                     onClick={() => {
                       setMode("settings");
                       setSelectedConversationId(null);
+                      setSelectedConversationCabinetPath(undefined);
                     }}
                   >
                     <Settings2 className="h-3.5 w-3.5" />

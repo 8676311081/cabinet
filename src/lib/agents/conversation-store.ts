@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import fs from "fs/promises";
 import path from "path";
 import type {
@@ -8,6 +9,7 @@ import type {
   ConversationTrigger,
 } from "../../types/conversations";
 import { discoverCabinetPaths } from "../cabinets/discovery";
+import { buildConversationInstanceKey } from "./conversation-identity";
 import { DATA_DIR, sanitizeFilename, virtualPathFromFs } from "../storage/path-utils";
 import {
   deleteFileOrDir,
@@ -79,6 +81,11 @@ function formatTimestampSegment(date: Date): string {
 
 function sanitizeSegment(value: string, fallback: string): string {
   return sanitizeFilename(value) || fallback;
+}
+
+function cabinetScopeSegment(cabinetPath?: string): string {
+  const normalized = cabinetPath?.trim() || "__root__";
+  return createHash("sha1").update(normalized).digest("hex").slice(0, 8);
 }
 
 function conversationDir(id: string, cabinetPath?: string): string {
@@ -251,11 +258,13 @@ export function buildConversationId(input: {
   agentSlug: string;
   trigger: ConversationTrigger;
   jobName?: string;
+  cabinetPath?: string;
   now?: Date;
 }): string {
   const now = input.now || new Date();
   const parts = [
     formatTimestampSegment(now),
+    cabinetScopeSegment(input.cabinetPath),
     sanitizeSegment(input.agentSlug, "agent"),
     input.trigger,
   ];
@@ -281,6 +290,7 @@ export async function createConversation(
     agentSlug: input.agentSlug,
     trigger: input.trigger,
     jobName: input.jobName || input.jobId,
+    cabinetPath: input.cabinetPath,
     now: new Date(startedAt),
   });
   const cp = input.cabinetPath;
@@ -750,7 +760,15 @@ export async function listConversationMetas(
       new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
   );
 
-  return filtered.slice(0, filters.limit || 200);
+  const deduped = new Map<string, ConversationMeta>();
+  for (const meta of filtered) {
+    const key = buildConversationInstanceKey(meta);
+    if (!deduped.has(key)) {
+      deduped.set(key, meta);
+    }
+  }
+
+  return Array.from(deduped.values()).slice(0, filters.limit || 200);
 }
 
 export async function getRunningConversationCounts(): Promise<Record<string, number>> {
