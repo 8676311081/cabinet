@@ -1,9 +1,13 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 const nextConfig: NextConfig = {
   output: "standalone",
   transpilePackages: ["@multica/core", "@multica/ui", "@multica/views"],
   serverExternalPackages: ["node-pty", "simple-git", "better-sqlite3"],
+  turbopack: {
+    root: path.resolve(__dirname, ".."),
+  },
   async rewrites() {
     const multicaApiUrl =
       process.env.MULTICA_API_URL || "http://localhost:8080";
