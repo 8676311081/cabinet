@@ -12,9 +12,11 @@ import { useEditorStore } from "@/stores/editor-store";
  * Hash format:
  *   #/home
  *   #/ops/agents
+ *   #/ops/tasks
  *   #/ops/agents/{slug}
  *   #/cabinet/{cabinetPath}
  *   #/cabinet/{cabinetPath}/agents
+ *   #/cabinet/{cabinetPath}/tasks
  *   #/cabinet/{cabinetPath}/agents/{slug}
  *   #/cabinet/{cabinetPath}/jobs
  *   #/cabinet/{cabinetPath}/data/{pagePath}
@@ -61,6 +63,9 @@ function buildHash(section: SectionState, pagePath: string | null): string {
   if (section.type === "agents" && section.mode === "cabinet" && section.cabinetPath) {
     return `#/cabinet/${encodePathSegment(section.cabinetPath)}/agents`;
   }
+  if (section.type === "tasks" && section.mode === "cabinet" && section.cabinetPath) {
+    return `#/cabinet/${encodePathSegment(section.cabinetPath)}/tasks`;
+  }
   if (section.type === "jobs" && section.mode === "cabinet" && section.cabinetPath) {
     return `#/cabinet/${encodePathSegment(section.cabinetPath)}/jobs`;
   }
@@ -69,6 +74,9 @@ function buildHash(section: SectionState, pagePath: string | null): string {
   }
   if (section.type === "agents") {
     return "#/ops/agents";
+  }
+  if (section.type === "tasks") {
+    return "#/ops/tasks";
   }
   if (section.type === "settings") {
     return section.slug
@@ -112,6 +120,13 @@ function parseHash(hash: string): RouteState {
         pagePath: null,
       };
     }
+
+    if (parts[1] === "tasks") {
+      return {
+        section: { type: "tasks", mode: "ops" },
+        pagePath: null,
+      };
+    }
   }
 
   if (parts[0] === "cabinet") {
@@ -142,6 +157,13 @@ function parseHash(hash: string): RouteState {
     if (leaf === "agents") {
       return {
         section: { type: "agents", mode: "cabinet", cabinetPath },
+        pagePath: null,
+      };
+    }
+
+    if (leaf === "tasks") {
+      return {
+        section: { type: "tasks", mode: "cabinet", cabinetPath },
         pagePath: null,
       };
     }

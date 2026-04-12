@@ -42,6 +42,10 @@ export interface AgentTask {
   updatedAt: string;
   completedAt?: string;
   result?: string;
+  cabinetPath?: string;
+  linkedConversationId?: string;
+  linkedConversationCabinetPath?: string;
+  startedAt?: string;
 }
 
 export type AgentType = "lead" | "specialist" | "support";

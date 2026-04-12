@@ -8,6 +8,7 @@ export type SectionType =
   | "page"
   | "agents"
   | "agent"
+  | "tasks"
   | "jobs"
   | "settings";
 export type SectionMode = "ops" | "cabinet";

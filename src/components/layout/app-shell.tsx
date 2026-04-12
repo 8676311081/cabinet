@@ -15,6 +15,7 @@ import { FileFallbackViewer } from "@/components/editor/file-fallback-viewer";
 import { HomeScreen } from "@/components/home/home-screen";
 import { AgentsWorkspace } from "@/components/agents/agents-workspace";
 import { JobsManager } from "@/components/jobs/jobs-manager";
+import { TasksBoard } from "@/components/tasks/tasks-board";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { TerminalTabs } from "@/components/terminal/terminal-tabs";
 import { AIPanel } from "@/components/ai-panel/ai-panel";
@@ -198,6 +199,14 @@ export function AppShell() {
         />
       );
     }
+    if (section.type === "tasks") {
+      return (
+        <TasksBoard
+          cabinetPath={section.cabinetPath}
+          workspaceMode={section.mode}
+        />
+      );
+    }
     if (section.type === "jobs") {
       return (
         <JobsManager
@@ -208,9 +217,8 @@ export function AppShell() {
     }
 
     // Page-based views (when a KB page is selected)
-    if (selectedNode?.type === "cabinet" && selectedPath) {
-      return <CabinetView cabinetPath={selectedPath} />;
-    }
+    // A cabinet's own markdown can be opened as a data page, so only render
+    // the dashboard when navigation explicitly targets the cabinet section.
     if (isApp && selectedNode) {
       return (
         <WebsiteViewer

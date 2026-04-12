@@ -22,6 +22,9 @@ export interface AgentTask {
   completedAt?: string;
   result?: string;           // Completion summary
   cabinetPath?: string;
+  linkedConversationId?: string;
+  linkedConversationCabinetPath?: string;
+  startedAt?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +135,16 @@ export async function getTask(
 export async function updateTask(
   agentSlug: string,
   taskId: string,
-  updates: Partial<Pick<AgentTask, "status" | "result">>,
+  updates: Partial<
+    Pick<
+      AgentTask,
+      | "status"
+      | "result"
+      | "linkedConversationId"
+      | "linkedConversationCabinetPath"
+      | "startedAt"
+    >
+  >,
   cabinetPath?: string
 ): Promise<AgentTask | null> {
   const task = await getTask(agentSlug, taskId, cabinetPath);
@@ -146,6 +158,8 @@ export async function updateTask(
 
   if (updates.status === "completed" || updates.status === "failed") {
     updated.completedAt = new Date().toISOString();
+  } else if (updates.status === "pending" || updates.status === "in_progress") {
+    delete updated.completedAt;
   }
 
   await fs.writeFile(

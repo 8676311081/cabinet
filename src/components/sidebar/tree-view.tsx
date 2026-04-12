@@ -28,6 +28,7 @@ import {
   BookOpen,
   Users,
   Bot,
+  SquareKanban,
   Pencil,
   FilePlus,
   FolderOpen,
@@ -121,7 +122,7 @@ const itemClass = (active: boolean) =>
   );
 
 export function TreeView() {
-  const { nodes, loading, selectedPath } = useTreeStore();
+  const { nodes, loading } = useTreeStore();
   const selectPage = useTreeStore((s) => s.selectPage);
   const createPage = useTreeStore((s) => s.createPage);
   const loadPage = useEditorStore((s) => s.loadPage);
@@ -244,6 +245,16 @@ export function TreeView() {
     void loadPage(targetCabinetPath);
     setSection({
       type: "cabinet",
+      mode: "cabinet",
+      cabinetPath: targetCabinetPath,
+    });
+  };
+
+  const openCabinetDataPage = (targetCabinetPath = cabinetPath) => {
+    selectPage(targetCabinetPath);
+    void loadPage(targetCabinetPath);
+    setSection({
+      type: "page",
       mode: "cabinet",
       cabinetPath: targetCabinetPath,
     });
@@ -498,6 +509,36 @@ export function TreeView() {
             {/* ── Divider ──────────────────────────────────── */}
             <div className="mx-3 my-1.5 border-t border-border" />
 
+            {/* ── Tasks ───────────────────────────────────── */}
+            <button
+              onClick={() => {
+                if (activeCabinet) {
+                  setSection({
+                    type: "tasks",
+                    mode: "cabinet",
+                    cabinetPath: activeCabinet.path,
+                  });
+                  return;
+                }
+                setSection({ type: "tasks", mode: "ops" });
+              }}
+              className={cn(
+                "text-[10px] font-semibold uppercase tracking-wider px-3 pt-2 pb-1 w-full text-left flex items-center gap-1.5 transition-colors",
+                section.type === "tasks" &&
+                  ((activeCabinet && section.cabinetPath === activeCabinet.path) ||
+                    (!activeCabinet && section.mode === "ops"))
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground/80"
+              )}
+              style={pad(1)}
+            >
+              <SquareKanban className="h-3.5 w-3.5 shrink-0" />
+              Tasks
+            </button>
+
+            {/* ── Divider ──────────────────────────────────── */}
+            <div className="mx-3 my-1.5 border-t border-border" />
+
             {/* ── Knowledge Base label ──────────────────────── */}
             <ContextMenu>
               <ContextMenuTrigger>
@@ -505,7 +546,7 @@ export function TreeView() {
                   onClick={() => {
                     setKbExpanded(!kbExpanded);
                     if (activeCabinet) {
-                      openCabinetOverview(activeCabinet.path);
+                      openCabinetDataPage(activeCabinet.path);
                       return;
                     }
                     setSection({ type: "home" });
