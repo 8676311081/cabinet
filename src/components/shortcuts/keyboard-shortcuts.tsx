@@ -54,7 +54,8 @@ export function KeyboardShortcuts() {
         }
       }
 
-      // Cmd+K is handled by search-dialog component
+      // Cmd+Shift+F is handled by search-dialog component
+      // Cmd+K is reserved for Multica command palette
     };
 
     window.addEventListener("keydown", handleKeyDown);

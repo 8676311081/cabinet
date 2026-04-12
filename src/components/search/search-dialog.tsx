@@ -30,10 +30,10 @@ export function SearchDialog() {
   const { selectPage } = useTreeStore();
   const { loadPage } = useEditorStore();
 
-  // Cmd+K to open
+  // Cmd+Shift+F to open (Cmd+K is reserved for Multica command palette)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "f") {
         e.preventDefault();
         setOpen(true);
       }
