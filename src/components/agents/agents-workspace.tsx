@@ -1624,9 +1624,6 @@ export function AgentsWorkspace({
                   </div>
                 </div>
                 <div className="mt-4 flex flex-wrap items-center gap-1.5">
-                  <span className="inline-flex items-center rounded-full bg-background/72 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
-                    {startCase(orgRoot.type, "Lead")}
-                  </span>
                   {orgRoot.heartbeat ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-background/72 px-2 py-0.5 text-[10px] text-muted-foreground">
                       <HeartPulse className="h-2.5 w-2.5 text-pink-400" />
@@ -1734,9 +1731,6 @@ export function AgentsWorkspace({
                                   </div>
 
                                   <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                                    <span className="inline-flex items-center rounded-full bg-background/76 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                                      {startCase(agent.type, "Specialist")}
-                                    </span>
                                     {agent.heartbeat ? (
                                       <span className="inline-flex items-center gap-1 rounded-full bg-background/76 px-2 py-0.5 text-[10px] text-muted-foreground">
                                         <HeartPulse className="h-2.5 w-2.5 text-pink-400" />
