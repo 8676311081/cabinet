@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, ChevronLeft, ChevronRight, Clock3, FolderOpen, FolderTree, HeartPulse, LayoutList, Loader2, Save, Send, Users, Zap } from "lucide-react";
+import { Calendar, ChevronLeft, ChevronRight, Clock3, FolderOpen, FolderTree, HeartPulse, LayoutList, Loader2, Maximize2, Minimize2, Save, Send, Users, Zap } from "lucide-react";
 import { KBEditor } from "@/components/editor/editor";
 import { HeaderActions } from "@/components/layout/header-actions";
 import { VersionHistory } from "@/components/editor/version-history";
@@ -312,6 +312,7 @@ export function CabinetView({ cabinetPath }: { cabinetPath: string }) {
   const [scheduleView, setScheduleView] = useState<"calendar" | "list">("calendar");
   const [calendarMode, setCalendarMode] = useState<CalendarMode>("week");
   const [calendarAnchor, setCalendarAnchor] = useState(() => new Date());
+  const [calendarFullscreen, setCalendarFullscreen] = useState(false);
   const scrollAreaHostRef = useRef<HTMLDivElement>(null);
   const titleSectionRef = useRef<HTMLDivElement>(null);
   const selectPage = useTreeStore((state) => state.selectPage);

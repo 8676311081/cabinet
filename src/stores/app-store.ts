@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { CabinetVisibilityMode } from "@/types/cabinets";
+import type { ConversationMeta } from "@/types/conversations";
 import { ROOT_CABINET_PATH } from "@/lib/cabinets/paths";
 
 export type SectionType =
@@ -38,6 +39,7 @@ interface AppState {
   sidebarCollapsed: boolean;
   aiPanelCollapsed: boolean;
   cabinetVisibilityModes: Record<string, CabinetVisibilityMode>;
+  taskPanelConversation: ConversationMeta | null;
   setSection: (section: SelectedSection) => void;
   toggleTerminal: () => void;
   closeTerminal: () => void;
@@ -51,6 +53,7 @@ interface AppState {
     cabinetPath: string,
     mode: CabinetVisibilityMode
   ) => void;
+  setTaskPanelConversation: (conversation: ConversationMeta | null) => void;
 }
 
 function normalizeVisibilityCabinetPath(cabinetPath?: string): string {
@@ -97,8 +100,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   sidebarCollapsed: false,
   aiPanelCollapsed: false,
   cabinetVisibilityModes: loadCabinetVisibilityModes(),
+  taskPanelConversation: null,
 
-  setSection: (section) => set({ section }),
+  setSection: (section) => set({ section, taskPanelConversation: null }),
 
   toggleTerminal: () => {
     const { terminalOpen, terminalTabs } = get();
@@ -164,6 +168,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ cabinetVisibilityModes: nextModes });
   },
+
+  setTaskPanelConversation: (conversation) => set({ taskPanelConversation: conversation }),
 
   openAgentTab: (taskTitle: string, prompt: string) => {
     const id = `agent-${Date.now()}`;

@@ -21,7 +21,6 @@ import {
   RotateCcw,
   Send,
   Square,
-  X,
   XCircle,
 } from "lucide-react";
 import { buildConversationInstanceKey } from "@/lib/agents/conversation-identity";
@@ -36,13 +35,10 @@ import { useComposer, type MentionableItem } from "@/hooks/use-composer";
 import type { HumanInboxDraft, AgentListItem } from "@/types/agents";
 import type { CabinetOverview, CabinetVisibilityMode } from "@/types/cabinets";
 import type {
-  ConversationDetail,
   ConversationMeta,
   ConversationStatus,
   ConversationTrigger,
 } from "@/types/conversations";
-import { WebTerminal } from "@/components/terminal/web-terminal";
-import { ConversationResultView } from "@/components/agents/conversation-result-view";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -700,6 +696,7 @@ export function TasksBoard({
   workspaceMode?: "ops" | "cabinet";
 } = {}) {
   const setSection = useAppStore((state) => state.setSection);
+  const setTaskPanelConversation = useAppStore((state) => state.setTaskPanelConversation);
   const cabinetVisibilityModes = useAppStore((state) => state.cabinetVisibilityModes);
   const setCabinetVisibilityMode = useAppStore((state) => state.setCabinetVisibilityMode);
   const resolvedWorkspaceMode = workspaceMode || (cabinetPath ? "cabinet" : "ops");
@@ -721,9 +718,6 @@ export function TasksBoard({
   const [selectedAssignAgentId, setSelectedAssignAgentId] = useState<string | null>(null);
   const [selectedFilterAgentId, setSelectedFilterAgentId] = useState<string>("all");
   const [triggerFilter, setTriggerFilter] = useState<TriggerFilter>("all");
-  const [panelConversation, setPanelConversation] = useState<ConversationMeta | null>(null);
-  const [panelDetail, setPanelDetail] = useState<ConversationDetail | null>(null);
-  const [panelLoading, setPanelLoading] = useState(false);
   const [busyConversationIds, setBusyConversationIds] = useState<Set<string>>(new Set());
 
   const refreshOverview = useCallback(async () => {
@@ -821,46 +815,6 @@ export function TasksBoard({
       setSelectedFilterAgentId("all");
     }
   }, [selectedFilterAgentId, visibleAgents]);
-
-  // Keep panelConversation in sync with refreshed conversations list
-  useEffect(() => {
-    if (!panelConversation) return;
-    const fresh = conversations.find((c) => c.id === panelConversation.id);
-    if (fresh) {
-      setPanelConversation(fresh);
-    }
-  }, [conversations, panelConversation?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Fetch full detail when a completed/failed conversation is selected
-  useEffect(() => {
-    if (!panelConversation) {
-      setPanelDetail(null);
-      return;
-    }
-    if (panelConversation.status === "running") {
-      setPanelDetail(null);
-      return;
-    }
-    let cancelled = false;
-    setPanelLoading(true);
-    const params = new URLSearchParams();
-    if (panelConversation.cabinetPath) {
-      params.set("cabinetPath", panelConversation.cabinetPath);
-    }
-    fetch(`/api/agents/conversations/${panelConversation.id}?${params.toString()}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled && data) {
-          setPanelDetail(data as ConversationDetail);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setPanelLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [panelConversation?.id, panelConversation?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeAssignDraft = useMemo(
     () => drafts.find((draft) => draft.id === assignDraftId) || null,
@@ -1114,12 +1068,7 @@ export function TasksBoard({
   }
 
   function openConversation(conversation: ConversationMeta) {
-    setPanelConversation(conversation);
-  }
-
-  function closePanel() {
-    setPanelConversation(null);
-    setPanelDetail(null);
+    setTaskPanelConversation(conversation);
   }
 
   const cabinetName =
@@ -1279,79 +1228,7 @@ export function TasksBoard({
         onStartNow={() => void handleStartFromDialog()}
       />
 
-      {panelConversation ? (
-        /* Full-width task detail panel */
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="flex items-center gap-2 border-b border-border/70 px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <ConversationStatusIcon status={panelConversation.status} />
-                <p className="truncate text-[13px] font-medium text-foreground">
-                  {panelConversation.title}
-                </p>
-              </div>
-              <p className="mt-0.5 truncate pl-6 text-[11px] text-muted-foreground">
-                {startCase(panelConversation.agentSlug)}
-                {cabinetLabel(panelConversation.cabinetPath)
-                  ? ` · ${cabinetLabel(panelConversation.cabinetPath)}`
-                  : ""}
-                {" · "}
-                {formatRelative(panelConversation.startedAt)}
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 shrink-0 p-0"
-              onClick={closePanel}
-            >
-              <X className="size-4" />
-            </Button>
-          </div>
-
-          <div className="flex-1 overflow-hidden">
-            {panelConversation.status === "running" ? (
-              <WebTerminal
-                sessionId={panelConversation.id}
-                displayPrompt={panelConversation.title}
-                reconnect
-                themeSurface="page"
-                onClose={() => {
-                  void refreshBoard();
-                }}
-              />
-            ) : panelLoading ? (
-              <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                Loading...
-              </div>
-            ) : panelDetail ? (
-              <ConversationResultView
-                detail={panelDetail}
-                onOpenArtifact={(artifactPath) => {
-                  const { selectPage } = useTreeStore.getState();
-                  selectPage(artifactPath);
-                  setSection(
-                    effectiveCabinetPath
-                      ? {
-                          type: "page",
-                          mode: "cabinet",
-                          cabinetPath: effectiveCabinetPath,
-                        }
-                      : { type: "page" }
-                  );
-                }}
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Could not load conversation detail.
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        /* Board lanes */
-        <div className="min-h-0 flex-1 overflow-x-auto">
+      <div className="min-h-0 flex-1 overflow-x-auto">
           {loading ? (
             <div className="flex h-full items-center justify-center gap-3 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
@@ -1498,7 +1375,6 @@ export function TasksBoard({
             </div>
           )}
         </div>
-      )}
     </div>
   );
 }

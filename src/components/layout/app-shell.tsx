@@ -19,6 +19,7 @@ import { TasksBoard } from "@/components/tasks/tasks-board";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { TerminalTabs } from "@/components/terminal/terminal-tabs";
 import { AIPanel } from "@/components/ai-panel/ai-panel";
+import { TaskDetailPanel } from "@/components/tasks/task-detail-panel";
 import { SearchDialog } from "@/components/search/search-dialog";
 import { KeyboardShortcuts } from "@/components/shortcuts/keyboard-shortcuts";
 import { StatusBar } from "@/components/layout/status-bar";
@@ -45,6 +46,7 @@ export function AppShell() {
   const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const setAiPanelCollapsed = useAppStore((s) => s.setAiPanelCollapsed);
   const aiPanelCollapsed = useAppStore((s) => s.aiPanelCollapsed);
+  const taskPanelConversation = useAppStore((s) => s.taskPanelConversation);
   const {
     update,
     refreshing: updateRefreshing,
@@ -317,6 +319,7 @@ export function AppShell() {
         {terminalOpen && <TerminalTabs />}
         <StatusBar />
       </div>
+      {taskPanelConversation && <TaskDetailPanel />}
       {!aiPanelCollapsed && <AIPanel />}
       <SearchDialog />
       <KeyboardShortcuts />

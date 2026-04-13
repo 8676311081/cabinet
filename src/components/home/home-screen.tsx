@@ -3,12 +3,21 @@
 import { useState, useEffect, useRef } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { useTreeStore } from "@/stores/tree-store";
-import { Users } from "lucide-react";
+import { Users, Download, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { flattenTree } from "@/lib/tree-utils";
 import { ComposerInput } from "@/components/composer/composer-input";
 import { useComposer, type MentionableItem } from "@/hooks/use-composer";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { AgentListItem } from "@/types/agents";
+import type { RegistryTemplate } from "@/lib/registry/registry-manifest";
 
 const QUICK_ACTIONS = [
   "Brainstorm ideas",
@@ -16,66 +25,6 @@ const QUICK_ACTIONS = [
   "Plan roadmap",
   "Create research plan",
   "Create requirements doc",
-];
-
-interface Cabinet {
-  name: string;
-  description: string;
-  agents: number;
-  domain: string;
-}
-
-const CABINETS: Cabinet[] = [
-  { name: "Content Marketing Agency", description: "SEO, blogs & social media on autopilot", agents: 8, domain: "Marketing" },
-  { name: "E-commerce Operator", description: "Listings, support, inventory & ads management", agents: 10, domain: "E-commerce" },
-  { name: "YouTube Factory", description: "Scripts, edits, thumbnails, scheduling & publishing", agents: 6, domain: "Media" },
-  { name: "Dev Agency", description: "PM, engineers, QA & DevOps pipeline", agents: 9, domain: "Software" },
-  { name: "Real Estate Leads", description: "Prospecting, outreach, follow-up & closing deals", agents: 7, domain: "Sales" },
-  { name: "Bookkeeping Firm", description: "Invoice reconciliation, tax prep & reporting", agents: 6, domain: "Finance" },
-  { name: "Grant Writing Agency", description: "Research grants, draft applications & track deadlines", agents: 5, domain: "Finance" },
-  { name: "Recruiting Agency", description: "Sourcing, screening, outreach & scheduling", agents: 8, domain: "Professional Services" },
-  { name: "Legal Doc Shop", description: "Contract drafting, NDA, compliance & client intake", agents: 6, domain: "Professional Services" },
-  { name: "Translation Bureau", description: "Intake, translate, QA, localization & delivery", agents: 5, domain: "Professional Services" },
-  { name: "Podcast Production House", description: "Research, scripting, editing & distribution", agents: 7, domain: "Media" },
-  { name: "Newsletter Empire", description: "Niche research, writing, curation & growth", agents: 5, domain: "Media" },
-  { name: "Stock Photo & Video Studio", description: "AI generation, keywording, listing & licensing", agents: 4, domain: "Media" },
-  { name: "Market Research Firm", description: "Data collection, analysis & report generation", agents: 6, domain: "Data & Research" },
-  { name: "Competitive Intelligence Agency", description: "Monitoring, alerts, trend reports & executive briefs", agents: 5, domain: "Data & Research" },
-  { name: "Lead Enrichment Service", description: "Scrape, verify, enrich, score & deliver lists", agents: 5, domain: "Data & Research" },
-  { name: "Online Course Factory", description: "Curriculum, content creation & platform setup", agents: 8, domain: "Education" },
-  { name: "Resume & Career Coaching", description: "Resume writing, cover letters & interview prep", agents: 6, domain: "Education" },
-  { name: "Customer Support BPO", description: "Ticket triage, response, escalation & reporting", agents: 7, domain: "Operations" },
-  { name: "Dropshipping Brand", description: "Product research, supplier, storefront & ads", agents: 8, domain: "E-commerce" },
-  { name: "SaaS Onboarding Agency", description: "Documentation, tutorials, email sequences & analytics", agents: 6, domain: "Operations" },
-  { name: "Review Management Agency", description: "Monitor reviews, draft responses & report sentiment", agents: 4, domain: "Marketing" },
-  { name: "Event Promotion Agency", description: "Find events, create assets, distribute & sell tickets", agents: 7, domain: "Marketing" },
-  { name: "UGC Ad Factory", description: "Script hooks, brief creators, edit & A/B test", agents: 7, domain: "Paid Social" },
-  { name: "Meta Ads War Room", description: "Creative variants, audience, launch & optimize ROAS", agents: 6, domain: "Paid Social" },
-  { name: "TikTok Shop Operator", description: "Product listings, affiliate outreach & live stream", agents: 8, domain: "E-commerce" },
-  { name: "Influencer Matchmaker", description: "Find creators, negotiate, brief & measure ROI", agents: 6, domain: "Paid Social" },
-  { name: "Cold Email Agency", description: "ICP research, list building, copy & sending", agents: 7, domain: "Sales" },
-  { name: "LinkedIn Lead Gen Shop", description: "Profile optimization, connections & DM sequences", agents: 5, domain: "Sales" },
-  { name: "Appointment Setting Firm", description: "Multi-channel outreach, qualification & booking", agents: 6, domain: "Sales" },
-  { name: "Amazon FBA Launcher", description: "Product research, listing, PPC & restock alerts", agents: 8, domain: "E-commerce" },
-  { name: "Etsy Shop Manager", description: "SEO titles, photos, customer messages & refreshes", agents: 5, domain: "E-commerce" },
-  { name: "Amazon PPC Agency", description: "Keyword harvesting, bid management & reporting", agents: 4, domain: "E-commerce" },
-  { name: "Ghostwriting Studio", description: "LinkedIn posts, Twitter threads & newsletters", agents: 5, domain: "Content Ops" },
-  { name: "Clip Farm", description: "Chop long-form into reels, shorts & captions", agents: 5, domain: "Media" },
-  { name: "Blog-to-Revenue Pipeline", description: "Keyword research, write, optimize & monetize", agents: 7, domain: "Marketing" },
-  { name: "Carousel Factory", description: "Design Instagram, LinkedIn & TikTok carousels", agents: 4, domain: "Marketing" },
-  { name: "Webflow & Framer Build Shop", description: "Design, build, copy, launch & maintain sites", agents: 6, domain: "Software" },
-  { name: "Shopify Store Setup Agency", description: "Theme, products, payments & launch checklist", agents: 5, domain: "E-commerce" },
-  { name: "Notion & Airtable Systems Builder", description: "Intake requirements, build, automate & document", agents: 5, domain: "Software" },
-  { name: "Podcast Booking Agency", description: "Research shows, pitch, schedule & prep talking points", agents: 6, domain: "Media" },
-  { name: "PR Pitching Machine", description: "Media list, write pitches, send & track", agents: 5, domain: "Marketing" },
-  { name: "Proposal & RFP Factory", description: "Parse RFPs, draft responses, format & submit", agents: 6, domain: "Professional Services" },
-  { name: "Warranty Returns Processor", description: "Intake claims, verify, process & report trends", agents: 5, domain: "Operations" },
-  { name: "Price Monitoring Service", description: "Track competitor prices, alert changes & report", agents: 4, domain: "Data & Research" },
-  { name: "Job Board Aggregator", description: "Scrape postings, deduplicate & categorize", agents: 5, domain: "Data & Research" },
-  { name: "Patent & Trademark Watch", description: "Monitor filings, flag conflicts & summarize", agents: 4, domain: "Data & Research" },
-  { name: "App Store Optimization Shop", description: "Keyword research, screenshots & A/B test", agents: 5, domain: "Marketing" },
-  { name: "Churned User Win-Back Agency", description: "Segment churned users, write sequences & track", agents: 4, domain: "Marketing" },
-  { name: "Onboarding Email Studio", description: "Map user journey, write drip, test & optimize", agents: 4, domain: "Marketing" },
 ];
 
 const DOMAIN_COLORS: Record<string, string> = {
@@ -100,41 +49,63 @@ function getGreeting(): string {
   return "Good evening";
 }
 
-function CabinetCard({ cabinet }: { cabinet: Cabinet }) {
-  const colorClass = DOMAIN_COLORS[cabinet.domain] || "bg-muted text-muted-foreground";
+function CabinetCard({
+  template,
+  onClick,
+}: {
+  template: RegistryTemplate;
+  onClick: () => void;
+}) {
+  const colorClass =
+    DOMAIN_COLORS[template.domain] || "bg-muted text-muted-foreground";
 
   return (
-    <div className="flex-shrink-0 w-64 h-36 rounded-xl border border-border bg-card p-4 flex flex-col cursor-default select-none">
+    <button
+      onClick={onClick}
+      className="group flex-shrink-0 w-64 h-36 rounded-xl border border-border bg-card p-4 flex flex-col text-left cursor-pointer transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md"
+    >
       <h3 className="text-sm font-medium text-foreground leading-tight">
-        {cabinet.name}
+        {template.name}
       </h3>
-      <p className="text-xs text-muted-foreground leading-relaxed mt-2">
-        {cabinet.description}
+      <p className="text-xs text-muted-foreground leading-relaxed mt-2 line-clamp-2">
+        {template.description}
       </p>
       <div className="flex items-center justify-between mt-auto pt-3">
-        <span className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full", colorClass)}>
-          {cabinet.domain}
+        <span
+          className={cn(
+            "text-[10px] font-medium px-2 py-0.5 rounded-full",
+            colorClass
+          )}
+        >
+          {template.domain}
         </span>
         <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
           <Users className="h-3 w-3" />
-          {cabinet.agents} agents
+          {template.agentCount} agents
+          <Download className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
         </span>
       </div>
-    </div>
+    </button>
   );
 }
 
-function InfiniteCarousel() {
+function RegistryCarousel({
+  templates,
+  onSelect,
+}: {
+  templates: RegistryTemplate[];
+  onSelect: (template: RegistryTemplate) => void;
+}) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isPaused, setIsPaused] = useState(false);
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || templates.length === 0) return;
 
     let animationId: number;
     let position = 0;
-    const speed = 1.2; // px per frame
+    const speed = 1.2;
 
     const animate = () => {
       if (!isPaused) {
@@ -150,9 +121,9 @@ function InfiniteCarousel() {
 
     animationId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationId);
-  }, [isPaused]);
+  }, [isPaused, templates]);
 
-  const doubled = [...CABINETS, ...CABINETS];
+  const doubled = [...templates, ...templates];
 
   return (
     <div
@@ -160,21 +131,136 @@ function InfiniteCarousel() {
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
     >
-      <div
-        ref={scrollRef}
-        className="flex gap-3 will-change-transform"
-      >
-        {doubled.map((cabinet, i) => (
-          <CabinetCard key={`${cabinet.name}-${i}`} cabinet={cabinet} />
+      <div ref={scrollRef} className="flex gap-3 will-change-transform">
+        {doubled.map((template, i) => (
+          <CabinetCard
+            key={`${template.slug}-${i}`}
+            template={template}
+            onClick={() => onSelect(template)}
+          />
         ))}
       </div>
-      <div className="absolute inset-0 backdrop-blur-[1.5px] hover:backdrop-blur-[0.5px] transition-all duration-500 z-10" />
-      <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
-        <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground bg-background/80 px-4 py-1.5 rounded-full border border-border">
-          Coming soon
-        </span>
-      </div>
     </div>
+  );
+}
+
+function ImportDialog({
+  template,
+  open,
+  onOpenChange,
+}: {
+  template: RegistryTemplate | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [name, setName] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const loadTree = useTreeStore((s) => s.loadTree);
+  const selectPage = useTreeStore((s) => s.selectPage);
+  const setSection = useAppStore((s) => s.setSection);
+
+  useEffect(() => {
+    if (template) setName(template.name);
+  }, [template]);
+
+  const handleImport = async () => {
+    if (!template) return;
+    setImporting(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/registry/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug: template.slug,
+          name: name.trim() !== template.name ? name.trim() : undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || "Import failed");
+        setImporting(false);
+        return;
+      }
+
+      const data = await res.json();
+      await loadTree();
+      selectPage(data.path);
+      setSection({
+        type: "cabinet",
+        mode: "cabinet",
+        cabinetPath: data.path,
+      });
+      onOpenChange(false);
+    } catch {
+      setError("Import failed. Check your internet connection.");
+      setImporting(false);
+    }
+  };
+
+  if (!template) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Import {template.name}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            {template.description}
+          </p>
+          <div className="flex gap-4 text-xs text-muted-foreground">
+            <span>{template.agentCount} agents</span>
+            <span>{template.jobCount} jobs</span>
+            {template.childCount > 0 && (
+              <span>{template.childCount} sub-cabinets</span>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              Cabinet name
+            </label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Cabinet name..."
+            />
+          </div>
+          {error && (
+            <p className="text-xs text-destructive">{error}</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={importing}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleImport}
+              disabled={importing || !name.trim()}
+            >
+              {importing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Importing...
+                </>
+              ) : (
+                <>
+                  <Download className="mr-2 h-4 w-4" />
+                  Import
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -183,6 +269,12 @@ export function HomeScreen() {
   const treeNodes = useTreeStore((s) => s.nodes);
   const [userName, setUserName] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentListItem[]>([]);
+  const [registryTemplates, setRegistryTemplates] = useState<
+    RegistryTemplate[]
+  >([]);
+  const [importTemplate, setImportTemplate] =
+    useState<RegistryTemplate | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/agents/config")
@@ -197,14 +289,23 @@ export function HomeScreen() {
     fetch("/api/cabinets/overview?path=.&visibility=all")
       .then((r) => r.json())
       .then((data) => {
-        const overview = (data.agents || []).map((a: Record<string, unknown>) => ({
-          name: a.name as string,
-          slug: a.slug as string,
-          emoji: (a.emoji as string) || "",
-          role: (a.role as string) || "",
-          active: a.active as boolean,
-        })) as AgentListItem[];
+        const overview = (data.agents || []).map(
+          (a: Record<string, unknown>) => ({
+            name: a.name as string,
+            slug: a.slug as string,
+            emoji: (a.emoji as string) || "",
+            role: (a.role as string) || "",
+            active: a.active as boolean,
+          })
+        ) as AgentListItem[];
         setAgents(overview);
+      })
+      .catch(() => {});
+
+    fetch("/api/registry")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.templates) setRegistryTemplates(data.templates);
       })
       .catch(() => {});
   }, []);
@@ -230,7 +331,8 @@ export function HomeScreen() {
   const composer = useComposer({
     items: mentionItems,
     onSubmit: async ({ message, mentionedPaths, mentionedAgents }) => {
-      const targetAgent = mentionedAgents.length > 0 ? mentionedAgents[0] : "general";
+      const targetAgent =
+        mentionedAgents.length > 0 ? mentionedAgents[0] : "general";
 
       const res = await fetch("/api/agents/conversations", {
         method: "POST",
@@ -300,8 +402,23 @@ export function HomeScreen() {
         <h2 className="text-sm font-medium text-muted-foreground text-center">
           Import a pre-made zero-human team
         </h2>
-        <InfiniteCarousel />
+        <RegistryCarousel
+          templates={registryTemplates}
+          onSelect={(template) => {
+            setImportTemplate(template);
+            setImportOpen(true);
+          }}
+        />
       </div>
+
+      <ImportDialog
+        template={importTemplate}
+        open={importOpen}
+        onOpenChange={(open) => {
+          setImportOpen(open);
+          if (!open) setImportTemplate(null);
+        }}
+      />
     </div>
   );
 }
