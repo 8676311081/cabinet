@@ -2,8 +2,13 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useAppStore } from "@/stores/app-store";
-import { Send, Users } from "lucide-react";
+import { useTreeStore } from "@/stores/tree-store";
+import { Users } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { flattenTree } from "@/lib/tree-utils";
+import { ComposerInput } from "@/components/composer/composer-input";
+import { useComposer, type MentionableItem } from "@/hooks/use-composer";
+import type { AgentListItem } from "@/types/agents";
 
 const QUICK_ACTIONS = [
   "Brainstorm ideas",
@@ -175,9 +180,9 @@ function InfiniteCarousel() {
 
 export function HomeScreen() {
   const setSection = useAppStore((s) => s.setSection);
-  const [prompt, setPrompt] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const treeNodes = useTreeStore((s) => s.nodes);
   const [userName, setUserName] = useState<string | null>(null);
+  const [agents, setAgents] = useState<AgentListItem[]>([]);
 
   useEffect(() => {
     fetch("/api/agents/config")
@@ -188,44 +193,66 @@ export function HomeScreen() {
         }
       })
       .catch(() => {});
+
+    fetch("/api/cabinets/overview?path=.&visibility=all")
+      .then((r) => r.json())
+      .then((data) => {
+        const overview = (data.agents || []).map((a: Record<string, unknown>) => ({
+          name: a.name as string,
+          slug: a.slug as string,
+          emoji: (a.emoji as string) || "",
+          role: (a.role as string) || "",
+          active: a.active as boolean,
+        })) as AgentListItem[];
+        setAgents(overview);
+      })
+      .catch(() => {});
   }, []);
 
-  const submitPrompt = async (text: string) => {
-    if (!text.trim() || submitting) return;
+  const mentionItems: MentionableItem[] = [
+    ...agents
+      .filter((a) => a.slug !== "general" && a.slug !== "editor")
+      .map((a) => ({
+        type: "agent" as const,
+        id: a.slug,
+        label: a.name,
+        sublabel: a.role || "",
+        icon: a.emoji,
+      })),
+    ...flattenTree(treeNodes).map((p) => ({
+      type: "page" as const,
+      id: p.path,
+      label: p.title,
+      sublabel: p.path,
+    })),
+  ];
 
-    setSubmitting(true);
-    try {
+  const composer = useComposer({
+    items: mentionItems,
+    onSubmit: async ({ message, mentionedPaths, mentionedAgents }) => {
+      const targetAgent = mentionedAgents.length > 0 ? mentionedAgents[0] : "general";
+
       const res = await fetch("/api/agents/conversations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agentSlug: "general",
-          userMessage: text.trim(),
-          mentionedPaths: [],
+          agentSlug: targetAgent,
+          userMessage: message,
+          mentionedPaths,
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setPrompt("");
-        setSection({
-          type: "agent",
-          mode: "ops",
-          slug: "general",
-          conversationId: data.conversation?.id,
-        });
-      }
-    } catch {
-      // ignore
-    } finally {
-      setSubmitting(false);
-    }
-  };
+      if (!res.ok) throw new Error("Failed to start conversation");
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    submitPrompt(prompt);
-  };
+      const data = await res.json();
+      setSection({
+        type: "agent",
+        mode: "ops",
+        slug: targetAgent,
+        conversationId: data.conversation?.id,
+      });
+    },
+  });
 
   const greeting = getGreeting();
   const displayName = userName || "there";
@@ -238,65 +265,29 @@ export function HomeScreen() {
           What are we working on today?
         </h1>
 
-        <form onSubmit={handleSubmit} className="relative w-full">
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-                e.preventDefault();
-                submitPrompt(prompt);
-              } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                setPrompt((prev) => prev + "\n");
-              }
-            }}
-            placeholder="I want to create..."
-            disabled={submitting}
-            rows={1}
-            className={cn(
-              "w-full rounded-xl border border-border bg-card px-4 py-3 pr-44 sm:pr-52",
-              "text-sm text-foreground placeholder:text-muted-foreground",
-              "focus:outline-none focus:ring-2 focus:ring-ring",
-              "shadow-sm resize-none"
-            )}
-            autoFocus
-          />
-          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-            <kbd className="hidden sm:inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/60 font-medium">
-              <span className="rounded border border-border/50 px-1 py-0.5">⌘</span>
-              <span>+</span>
-              <span className="rounded border border-border/50 px-1 py-0.5">↵</span>
-              <span className="ml-0.5">new line</span>
-            </kbd>
-            <button
-              type="submit"
-              disabled={!prompt.trim() || submitting}
-              className={cn(
-                "h-8 w-8 rounded-lg flex items-center justify-center",
-                "transition-colors",
-                prompt.trim() && !submitting
-                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                  : "bg-muted text-muted-foreground"
-              )}
-            >
-              <Send className="h-4 w-4" />
-            </button>
-          </div>
-        </form>
+        <ComposerInput
+          composer={composer}
+          placeholder="I want to create..."
+          variant="card"
+          items={mentionItems}
+          autoFocus
+          className="w-full"
+          minHeight="44px"
+          maxHeight="160px"
+        />
 
         <div className="flex flex-wrap items-center justify-center gap-2">
           {QUICK_ACTIONS.map((action) => (
             <button
               key={action}
-              onClick={() => submitPrompt(action)}
-              disabled={submitting}
+              onClick={() => void composer.submit(action)}
+              disabled={composer.submitting}
               className={cn(
                 "rounded-full border border-border px-4 py-1.5",
                 "text-sm text-foreground/80",
                 "hover:bg-accent hover:text-accent-foreground",
                 "transition-colors",
-                submitting && "opacity-50 cursor-not-allowed"
+                composer.submitting && "opacity-50 cursor-not-allowed"
               )}
             >
               {action}

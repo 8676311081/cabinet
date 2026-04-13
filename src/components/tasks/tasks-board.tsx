@@ -26,7 +26,11 @@ import { ROOT_CABINET_PATH } from "@/lib/cabinets/paths";
 import { CABINET_VISIBILITY_OPTIONS } from "@/lib/cabinets/visibility";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
-import type { HumanInboxDraft } from "@/types/agents";
+import { useTreeStore } from "@/stores/tree-store";
+import { flattenTree } from "@/lib/tree-utils";
+import { ComposerInput } from "@/components/composer/composer-input";
+import { useComposer, type MentionableItem } from "@/hooks/use-composer";
+import type { HumanInboxDraft, AgentListItem } from "@/types/agents";
 import type { CabinetOverview, CabinetVisibilityMode } from "@/types/cabinets";
 import type {
   ConversationMeta,
@@ -56,13 +60,6 @@ import {
 type VisibleAgent = CabinetOverview["agents"][number];
 type TriggerFilter = "all" | ConversationTrigger;
 type BoardLane = "inbox" | "running" | "completed" | "failed";
-
-const PRIORITY_OPTIONS = [
-  { label: "P0", value: "1" },
-  { label: "P1", value: "2" },
-  { label: "P2", value: "3" },
-  { label: "P3", value: "4" },
-] as const;
 
 const TRIGGER_FILTERS: TriggerFilter[] = ["all", "manual", "job", "heartbeat"];
 
@@ -239,111 +236,81 @@ function DraftStatusIcon() {
 function CreateDraftDialog({
   open,
   onOpenChange,
-  title,
-  onTitleChange,
-  description,
-  onDescriptionChange,
-  priority,
-  onPriorityChange,
-  creating,
-  onSubmit,
+  effectiveCabinetPath,
+  visibleAgents,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  title: string;
-  onTitleChange: (value: string) => void;
-  description: string;
-  onDescriptionChange: (value: string) => void;
-  priority: string;
-  onPriorityChange: (value: string) => void;
-  creating: boolean;
-  onSubmit: () => void;
+  effectiveCabinetPath?: string;
+  visibleAgents: VisibleAgent[];
+  onCreated: () => void;
 }) {
+  const treeNodes = useTreeStore((s) => s.nodes);
+
+  const mentionItems: MentionableItem[] = [
+    ...visibleAgents.map((a) => ({
+      type: "agent" as const,
+      id: a.slug,
+      label: a.name,
+      sublabel: a.role || "",
+      icon: a.emoji,
+    })),
+    ...flattenTree(treeNodes).map((p) => ({
+      type: "page" as const,
+      id: p.path,
+      label: p.title,
+      sublabel: p.path,
+    })),
+  ];
+
+  const composer = useComposer({
+    items: mentionItems,
+    onSubmit: async ({ message, mentionedPaths, mentionedAgents }) => {
+      const lines = message.split("\n");
+      const title = lines[0].trim();
+      const description = lines.slice(1).join("\n").trim();
+      const assignedAgent = mentionedAgents.length > 0 ? mentionedAgents[0] : undefined;
+
+      const response = await fetch("/api/agents/inbox-drafts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          description,
+          priority: 3,
+          mentionedPaths,
+          assignedAgentSlug: assignedAgent,
+          cabinetPath: effectiveCabinetPath,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to create inbox draft");
+
+      onOpenChange(false);
+      onCreated();
+    },
+  });
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Add Inbox Task</DialogTitle>
+      <DialogContent className="sm:max-w-xl p-0 gap-0 overflow-visible">
+        <DialogHeader className="px-5 pt-5 pb-3">
+          <DialogTitle>What needs to get done?</DialogTitle>
           <DialogDescription>
-            Capture something you want executed. You can assign the agent later from Inbox.
+            Describe the task. Use @ to attach pages or assign an agent.
           </DialogDescription>
         </DialogHeader>
-
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <label
-              htmlFor="draft-title"
-              className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70"
-            >
-              Task title
-            </label>
-            <Input
-              id="draft-title"
-              value={title}
-              onChange={(event) => onTitleChange(event.target.value)}
-              placeholder="Draft the next task you want to execute"
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <label
-              htmlFor="draft-context"
-              className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70"
-            >
-              Context
-            </label>
-            <textarea
-              id="draft-context"
-              value={description}
-              onChange={(event) => onDescriptionChange(event.target.value)}
-              placeholder="Optional details, constraints, or acceptance notes"
-              className="min-h-[140px] rounded-[22px] border border-input bg-transparent px-4 py-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            />
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-[140px]">
-            <div className="flex flex-col gap-2">
-              <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-                Priority
-              </label>
-              <Select
-                items={PRIORITY_OPTIONS.map((option) => ({
-                  label: option.label,
-                  value: option.value,
-                }))}
-                value={priority}
-                onValueChange={(value) => onPriorityChange(String(value || "3"))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent align="start">
-                  <SelectGroup>
-                    {PRIORITY_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={onSubmit} disabled={!title.trim() || creating}>
-            {creating ? (
-              <Loader2 data-icon="inline-start" className="animate-spin" />
-            ) : (
-              <Send data-icon="inline-start" />
-            )}
-            Add to inbox
-          </Button>
-        </DialogFooter>
+        <ComposerInput
+          composer={composer}
+          placeholder="Write a blog post about our Q2 results..."
+          submitLabel="Add to inbox"
+          variant="inline"
+          items={mentionItems}
+          autoFocus
+          minHeight="100px"
+          maxHeight="260px"
+        />
       </DialogContent>
     </Dialog>
   );
@@ -704,13 +671,9 @@ export function TasksBoard({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [assignDraftId, setAssignDraftId] = useState<string | null>(null);
   const [assignBusyAction, setAssignBusyAction] = useState<"save" | "start" | null>(null);
   const [busyDraftId, setBusyDraftId] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState<string>("3");
   const [selectedAssignAgentId, setSelectedAssignAgentId] = useState<string | null>(null);
   const [selectedFilterAgentId, setSelectedFilterAgentId] = useState<string>("all");
   const [triggerFilter, setTriggerFilter] = useState<TriggerFilter>("all");
@@ -912,36 +875,6 @@ export function TasksBoard({
     },
     [agentByKey]
   );
-
-  async function createDraft() {
-    if (!title.trim()) return;
-
-    setCreating(true);
-    try {
-      const response = await fetch("/api/agents/inbox-drafts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim(),
-          priority: Number(priority),
-          cabinetPath: effectiveCabinetPath,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to create inbox draft");
-      }
-
-      setTitle("");
-      setDescription("");
-      setPriority("3");
-      setCreateDialogOpen(false);
-      await refreshDrafts();
-    } finally {
-      setCreating(false);
-    }
-  }
 
   async function saveAssignment(
     draft: HumanInboxDraft,
@@ -1196,14 +1129,9 @@ export function TasksBoard({
       <CreateDraftDialog
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
-        title={title}
-        onTitleChange={setTitle}
-        description={description}
-        onDescriptionChange={setDescription}
-        priority={priority}
-        onPriorityChange={setPriority}
-        creating={creating}
-        onSubmit={() => void createDraft()}
+        effectiveCabinetPath={effectiveCabinetPath}
+        visibleAgents={visibleAgents}
+        onCreated={() => void refreshDrafts()}
       />
 
       <AssignDraftDialog

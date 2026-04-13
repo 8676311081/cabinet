@@ -1,5 +1,7 @@
 # Progress
 
+[2026-04-13] Added right-click context menu to the Cabinet header in the sidebar. Shows: Rename (disabled with "coming soon" tooltip), Copy Relative Path (nested cabinets only), Copy Full Path, Open in Finder, and Delete (nested cabinets only, with confirmation). Root cabinet hides Rename-breaking and destructive options.
+
 [2026-04-13] Composer hint bar: moved quick action chips below the composer on the home screen. Added grey hints below all composer cards — "use @ to mention" on the left and "Shift + Enter new line" on the right (responsive, hidden on small screens). Send button stays inside the card. Also added hints to cabinet-specific page composer (cabinet-view.tsx) and standardized its keyboard to Shift+Enter for newline.
 
 [2026-04-13] Unified composer component: Created shared `useComposer` hook and `ComposerInput` component that replaces 4 duplicate input implementations (home screen, agent workspace panel + quick-send popup, AI panel editor chat, task board). All surfaces now support `@` mentions for both pages and agents in a single unified dropdown with grouped sections. The "Add Inbox Task" dialog was redesigned from a rigid form (title/description/priority fields) into a conversational composer. Extracted shared `flattenTree` and `makePageContextLabel` into `src/lib/tree-utils.ts`. Submit behavior is Enter to send, Shift+Enter for newline across all surfaces.

@@ -658,12 +658,12 @@ function CabinetTaskComposer({
                 }
               }
 
-              if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+              if (e.key === "Enter" && e.shiftKey) {
+                return; // default: insert newline
+              }
+              if (e.key === "Enter") {
                 e.preventDefault();
                 void submit(prompt);
-              } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                setPrompt((p) => p + "\n");
               }
             }}
             placeholder={placeholder}
@@ -733,6 +733,18 @@ function CabinetTaskComposer({
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+          <span className="text-[11px] text-muted-foreground/50">
+            use <kbd className="rounded border border-border/50 bg-muted/50 px-1 py-0.5 font-mono text-[10px]">@</kbd> to mention
+          </span>
+          <div className="hidden sm:flex items-center gap-1 text-[11px] text-muted-foreground/50">
+            <kbd className="rounded border border-border/50 bg-muted/50 px-1 py-0.5 font-mono text-[10px]">Shift</kbd>
+            <span>+</span>
+            <kbd className="rounded border border-border/50 bg-muted/50 px-1 py-0.5 font-mono text-[10px]">↵</kbd>
+            <span className="ml-0.5">new line</span>
+          </div>
+        </div>
+
         <div className="flex flex-wrap items-end justify-between gap-3">
           <Select
             items={assignableAgents.map((agent) => ({
@@ -763,17 +775,6 @@ function CabinetTaskComposer({
               </SelectGroup>
             </SelectContent>
           </Select>
-
-          <div className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground/65">
-            <kbd className="rounded border border-border bg-muted/55 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-              ⌘
-            </kbd>
-            <span>+</span>
-            <kbd className="rounded border border-border bg-muted/55 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-              ↵
-            </kbd>
-            <span className="ml-1">new line</span>
-          </div>
         </div>
       </div>
     </div>

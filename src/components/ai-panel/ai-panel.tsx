@@ -3,9 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
   X,
-  Send,
   Sparkles,
-  FileText,
   Trash2,
   ChevronDown,
   ChevronRight,
@@ -18,30 +16,13 @@ import { Button } from "@/components/ui/button";
 import { useAIPanelStore } from "@/stores/ai-panel-store";
 import { useEditorStore } from "@/stores/editor-store";
 import { useAppStore } from "@/stores/app-store";
+import { useTreeStore } from "@/stores/tree-store";
 import { WebTerminal } from "@/components/terminal/web-terminal";
-import type { TreeNode } from "@/types";
 import type { ConversationDetail, ConversationMeta } from "@/types/conversations";
-
-interface FlatPage {
-  path: string;
-  title: string;
-}
-
-function flattenTree(nodes: TreeNode[]): FlatPage[] {
-  const result: FlatPage[] = [];
-  for (const node of nodes) {
-    if (node.type !== "website") {
-      result.push({
-        path: node.path,
-        title: node.frontmatter?.title || node.name,
-      });
-    }
-    if (node.children) {
-      result.push(...flattenTree(node.children));
-    }
-  }
-  return result;
-}
+import type { AgentListItem } from "@/types/agents";
+import { flattenTree } from "@/lib/tree-utils";
+import { ComposerInput } from "@/components/composer/composer-input";
+import { useComposer, type MentionableItem } from "@/hooks/use-composer";
 
 interface PastSession {
   id: string;
@@ -64,20 +45,31 @@ export function AIPanel() {
     clearAllSessions,
   } = useAIPanelStore();
   const { currentPath, loadPage } = useEditorStore();
-  const [input, setInput] = useState("");
-  const [mentionedPages, setMentionedPages] = useState<string[]>([]);
+  const treeNodes = useTreeStore((s) => s.nodes);
+  const [agents, setAgents] = useState<AgentListItem[]>([]);
   const [pastSessions, setPastSessions] = useState<PastSession[]>([]);
   const [expandedPast, setExpandedPast] = useState<Set<string>>(new Set());
   const [pastSessionDetails, setPastSessionDetails] = useState<Record<string, string>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // @ mention state
-  const [showMentions, setShowMentions] = useState(false);
-  const [mentionQuery, setMentionQuery] = useState("");
-  const [mentionIndex, setMentionIndex] = useState(0);
-  const [allPages, setAllPages] = useState<FlatPage[]>([]);
-  const [mentionStartPos, setMentionStartPos] = useState(0);
+  // Build mentionable items from tree + agents
+  const mentionItems: MentionableItem[] = [
+    ...agents
+      .filter((a) => a.slug !== "editor")
+      .map((a) => ({
+        type: "agent" as const,
+        id: a.slug,
+        label: a.name,
+        sublabel: a.role || "",
+        icon: a.emoji,
+      })),
+    ...flattenTree(treeNodes).map((p) => ({
+      type: "page" as const,
+      id: p.path,
+      label: p.title,
+      sublabel: p.path,
+    })),
+  ];
 
   const loadPastSessions = useCallback(async () => {
     if (!currentPath || !isOpen) return;
@@ -172,15 +164,22 @@ export function AIPanel() {
     restore();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load pages for @ mentions
+  // Load agents for @ mentions
   useEffect(() => {
     if (!isOpen) return;
     const load = async () => {
       try {
-        const res = await fetch("/api/tree");
+        const res = await fetch("/api/cabinets/overview?path=.&visibility=all");
         if (res.ok) {
-          const tree = await res.json();
-          setAllPages(flattenTree(tree));
+          const data = await res.json();
+          const overview = (data.agents || []).map((a: Record<string, unknown>) => ({
+            name: a.name as string,
+            slug: a.slug as string,
+            emoji: (a.emoji as string) || "",
+            role: (a.role as string) || "",
+            active: a.active as boolean,
+          })) as AgentListItem[];
+          setAgents(overview);
         }
       } catch {}
     };
@@ -192,11 +191,57 @@ export function AIPanel() {
     void loadPastSessions();
   }, [loadPastSessions]);
 
-  const filteredPages = allPages.filter(
-    (p) =>
-      p.title.toLowerCase().includes(mentionQuery.toLowerCase()) ||
-      p.path.toLowerCase().includes(mentionQuery.toLowerCase())
-  );
+  const composer = useComposer({
+    items: mentionItems,
+    disabled: !currentPath,
+    onSubmit: async ({ message, mentionedPaths, mentionedAgents }) => {
+      if (!currentPath) return;
+
+      // If user @-mentioned an agent, route to that agent instead of editor
+      const targetAgent = mentionedAgents.length > 0 ? mentionedAgents[0] : null;
+
+      const response = await fetch("/api/agents/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          targetAgent
+            ? {
+                agentSlug: targetAgent,
+                userMessage: message,
+                mentionedPaths,
+              }
+            : {
+                source: "editor",
+                pagePath: currentPath,
+                userMessage: message,
+                mentionedPaths,
+              }
+        ),
+      });
+
+      if (!response.ok) throw new Error("Failed to start conversation");
+
+      const data = await response.json();
+      const conversation = data.conversation as { id: string; title: string };
+
+      addEditorSession({
+        id: conversation.id,
+        sessionId: conversation.id,
+        pagePath: currentPath,
+        userMessage: message,
+        prompt: conversation.title,
+        timestamp: Date.now(),
+        status: "running",
+        reconnect: true,
+      });
+
+      setTimeout(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      }, 100);
+    },
+  });
 
   // Auto-scroll on new sessions
   useEffect(() => {
@@ -208,110 +253,9 @@ export function AIPanel() {
   // Focus input when panel opens
   useEffect(() => {
     if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 100);
+      setTimeout(() => composer.textareaRef.current?.focus(), 100);
     }
-  }, [isOpen]);
-
-  const insertMention = useCallback(
-    (page: FlatPage) => {
-      const before = input.slice(0, mentionStartPos);
-      const after = input.slice(
-        inputRef.current?.selectionStart || input.length
-      );
-      const newInput = `${before}@${page.title} ${after}`;
-      setInput(newInput);
-      setMentionedPages((prev) =>
-        prev.includes(page.path) ? prev : [...prev, page.path]
-      );
-      setShowMentions(false);
-      setMentionQuery("");
-      setTimeout(() => {
-        if (inputRef.current) {
-          const pos = before.length + page.title.length + 2;
-          inputRef.current.selectionStart = pos;
-          inputRef.current.selectionEnd = pos;
-          inputRef.current.focus();
-        }
-      }, 0);
-    },
-    [input, mentionStartPos]
-  );
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    const pos = e.target.selectionStart || 0;
-    setInput(value);
-
-    const textBefore = value.slice(0, pos);
-    const atIndex = textBefore.lastIndexOf("@");
-
-    if (atIndex !== -1) {
-      const charBeforeAt = atIndex > 0 ? textBefore[atIndex - 1] : " ";
-      if (charBeforeAt === " " || charBeforeAt === "\n" || atIndex === 0) {
-        const query = textBefore.slice(atIndex + 1);
-        if (!query.includes(" ") && !query.includes("\n")) {
-          setShowMentions(true);
-          setMentionQuery(query);
-          setMentionIndex(0);
-          setMentionStartPos(atIndex);
-          return;
-        }
-      }
-    }
-    setShowMentions(false);
-  };
-
-  const handleSubmit = async () => {
-    if (!input.trim() || !currentPath) return;
-
-    const instruction = input.trim();
-    setInput("");
-    const selectedMentionedPages = mentionedPages;
-    setMentionedPages([]);
-
-    try {
-      const response = await fetch("/api/agents/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source: "editor",
-          pagePath: currentPath,
-          userMessage: instruction,
-          mentionedPaths: selectedMentionedPages,
-        }),
-      });
-
-      if (!response.ok) {
-        setInput(instruction);
-        setMentionedPages(selectedMentionedPages);
-        return;
-      }
-
-      const data = await response.json();
-      const conversation = data.conversation as { id: string; title: string };
-
-      addEditorSession({
-        id: conversation.id,
-        sessionId: conversation.id,
-        pagePath: currentPath,
-        userMessage: instruction,
-        prompt: conversation.title,
-        timestamp: Date.now(),
-        status: "running",
-        reconnect: true,
-      });
-    } catch {
-      setInput(instruction);
-      setMentionedPages(selectedMentionedPages);
-      return;
-    }
-
-    setTimeout(() => {
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }
-    }, 100);
-  };
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSessionEnd = useCallback(
     async (sessionId: string) => {
@@ -329,36 +273,6 @@ export function AIPanel() {
     },
     [loadPage, loadPastSessions, markSessionCompleted]
   );
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (showMentions && filteredPages.length > 0) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setMentionIndex((i) => Math.min(i + 1, filteredPages.length - 1));
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setMentionIndex((i) => Math.max(i - 1, 0));
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        insertMention(filteredPages[mentionIndex]);
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setShowMentions(false);
-        return;
-      }
-    }
-
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
 
   const togglePastExpanded = async (id: string) => {
     const wasExpanded = expandedPast.has(id);
@@ -624,94 +538,21 @@ export function AIPanel() {
         ))}
 
       {/* Input */}
-      <div className="border-t border-border p-3 shrink-0">
-        {mentionedPages.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-2">
-            {mentionedPages.map((pagePath) => {
-              const page = allPages.find((p) => p.path === pagePath);
-              return (
-                <span
-                  key={pagePath}
-                  className="inline-flex items-center gap-1 text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded"
-                >
-                  <FileText className="h-2.5 w-2.5" />
-                  {page?.title || pagePath}
-                  <button
-                    onClick={() =>
-                      setMentionedPages((prev) =>
-                        prev.filter((p) => p !== pagePath)
-                      )
-                    }
-                    className="hover:text-destructive ml-0.5"
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </span>
-              );
-            })}
-          </div>
-        )}
-
-        <div className="relative">
-          {showMentions && filteredPages.length > 0 && (
-            <div className="absolute bottom-full left-0 right-0 mb-1 bg-popover border border-border rounded-lg shadow-lg max-h-[200px] overflow-y-auto py-1 z-50">
-              {filteredPages.slice(0, 10).map((page, i) => (
-                <button
-                  key={page.path}
-                  onClick={() => insertMention(page)}
-                  className={cn(
-                    "flex items-center gap-2 w-full px-3 py-1.5 text-left transition-colors",
-                    i === mentionIndex
-                      ? "bg-accent text-accent-foreground"
-                      : "hover:bg-accent/50"
-                  )}
-                >
-                  <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[12px] font-medium truncate">
-                      {page.title}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground/60 truncate">
-                      {page.path}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              currentPath
-                ? "Ask anything... use @ to reference pages"
-                : "Select a page first..."
-            }
-            disabled={!currentPath}
-            rows={2}
-            className={cn(
-              "w-full resize-none rounded-lg border border-border bg-muted/30 px-3 py-2.5 pr-10",
-              "text-[13px] leading-relaxed placeholder:text-muted-foreground/50",
-              "focus:outline-none focus:ring-1 focus:ring-ring",
-              "disabled:opacity-50 disabled:cursor-not-allowed"
-            )}
-          />
-          <div className="absolute right-1.5 bottom-1.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              title="Send"
-              onClick={handleSubmit}
-              disabled={!input.trim() || !currentPath}
-            >
-              <Send className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
+      <div className="border-t border-border shrink-0">
+        <ComposerInput
+          composer={composer}
+          placeholder={
+            currentPath
+              ? "Ask anything... use @ to mention pages or agents"
+              : "Select a page first..."
+          }
+          disabled={!currentPath}
+          variant="inline"
+          minHeight="56px"
+          maxHeight="160px"
+          items={mentionItems}
+          autoFocus={isOpen}
+        />
       </div>
     </div>
   );
