@@ -63,3 +63,7 @@ data/**/.DS_Store
 
 # stray build artifacts
 data/.agents/.library/.next/
+
+# cabinetai CLI
+cabinetai/dist/
+cabinetai/node_modules/
