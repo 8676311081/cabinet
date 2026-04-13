@@ -51,7 +51,6 @@ const STANDALONE_PRUNE_PATHS = [
   "next.config.ts",
   "package-lock.json",
   "postcss.config.mjs",
-  "run-agent.sh",
   "skills-lock.json",
   "tsconfig.json",
   "tsconfig.tsbuildinfo",

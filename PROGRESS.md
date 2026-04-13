@@ -1,5 +1,7 @@
 # Progress
 
+[2026-04-13] Removed legacy run-agent.sh script and its references from Electron packaging configs. The in-app agent system has superseded this manual bash loop approach.
+
 [2026-04-12] Cabinet view: moved visibility depth selector from a separate column to a subtle inline pill bar beneath stats (more grounded). Added Start All / Stop All / Restart All controls to the cabinet header bar, scoped to own-cabinet agents only (no sub-cabinets). Scheduler API now accepts optional cabinetPath to scope start-all/stop-all operations.
 
 [2026-04-12] Task board header: moved selectors and refresh button to same row as filter chips (chips left, selectors right). Active chip color now matches its type (sky for Manual, emerald for Jobs, pink for Heartbeat) instead of generic primary.
@@ -152,3 +154,5 @@
 [2026-04-10] Added in-app toast notifications for agent task completion/failure. When a conversation finishes, a slide-in toast appears in the bottom-right with agent emoji, status, and title. Clicking navigates to the conversation. Uses an in-memory notification queue drained by SSE. Documented in notifications.md.
 
 [2026-04-10] Added notification sounds for task completion/failure toasts. Uses Web Audio API to synthesize tones — ascending chime for success, descending tone for failure. No audio files needed.
+
+[2026-04-13] COO heartbeat: posted Week of April 13 operating review at example-text-your-mom/company/operations. Added "Marketing Activated?" and "Financial Risk" columns per CFO request. Sent messages to CFO (confirming column addition), CEO (overdue items + activation checklist), and Product Manager (OB-3 resizing + OB-6 schema priority). Created concrete 5-step activation checklist for paused marketing cabinets.
