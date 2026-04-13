@@ -9,20 +9,28 @@ import {
 } from "react";
 import {
   Bot,
+  Calendar,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Circle,
   Clock3,
   HeartPulse,
   Inbox,
+  KanbanSquare,
   Loader2,
+  Maximize2,
+  Minimize2,
   Play,
   Plus,
   RefreshCw,
   RotateCcw,
+  Save,
   Send,
   Square,
   Trash2,
   XCircle,
+  Zap,
 } from "lucide-react";
 import { buildConversationInstanceKey } from "@/lib/agents/conversation-identity";
 import { ROOT_CABINET_PATH } from "@/lib/cabinets/paths";
@@ -33,6 +41,9 @@ import { useTreeStore } from "@/stores/tree-store";
 import { flattenTree } from "@/lib/tree-utils";
 import { ComposerInput } from "@/components/composer/composer-input";
 import { useComposer, type MentionableItem } from "@/hooks/use-composer";
+import { ScheduleCalendar, type CalendarMode } from "@/components/cabinets/schedule-calendar";
+import { SchedulePicker } from "@/components/mission-control/schedule-picker";
+import type { ScheduleEvent } from "@/lib/agents/cron-compute";
 import type { HumanInboxDraft, AgentListItem } from "@/types/agents";
 import type { CabinetOverview, CabinetVisibilityMode } from "@/types/cabinets";
 import type {
@@ -728,6 +739,20 @@ export function TasksBoard({
   const [selectedFilterAgentId, setSelectedFilterAgentId] = useState<string>("all");
   const [triggerFilter, setTriggerFilter] = useState<TriggerFilter>("all");
   const [busyConversationIds, setBusyConversationIds] = useState<Set<string>>(new Set());
+  const [boardView, setBoardView] = useState<"board" | "schedule">("board");
+  const [calendarMode, setCalendarMode] = useState<CalendarMode>("week");
+  const [calendarAnchor, setCalendarAnchor] = useState(() => new Date());
+  const [calendarFullscreen, setCalendarFullscreen] = useState(false);
+  const [scheduleJobDialog, setScheduleJobDialog] = useState<{
+    agentSlug: string; agentName: string; cabinetPath: string;
+    draft: { id: string; name: string; schedule: string; prompt: string; enabled: boolean };
+  } | null>(null);
+  const [scheduleHeartbeatDialog, setScheduleHeartbeatDialog] = useState<{
+    agentSlug: string; agentName: string; cabinetPath: string;
+    heartbeat: string; active: boolean;
+  } | null>(null);
+  const [scheduleDialogBusy, setScheduleDialogBusy] = useState(false);
+  const [scheduleDialogSaving, setScheduleDialogSaving] = useState(false);
 
   const refreshOverview = useCallback(async () => {
     const params = new URLSearchParams({
@@ -1094,6 +1119,93 @@ export function TasksBoard({
     setTaskPanelConversation(conversation);
   }
 
+  function handleScheduleEventClick(event: ScheduleEvent) {
+    if (event.sourceType === "job" && event.jobRef && event.agentRef) {
+      setScheduleJobDialog({
+        agentSlug: event.agentRef.slug, agentName: event.agentRef.name,
+        cabinetPath: event.agentRef.cabinetPath || effectiveCabinetPath,
+        draft: { id: event.jobRef.id, name: event.jobRef.name, schedule: event.jobRef.schedule, prompt: event.jobRef.prompt || "", enabled: event.jobRef.enabled },
+      });
+    } else if (event.sourceType === "heartbeat" && event.agentRef) {
+      setScheduleHeartbeatDialog({
+        agentSlug: event.agentRef.slug, agentName: event.agentRef.name,
+        cabinetPath: event.agentRef.cabinetPath || effectiveCabinetPath,
+        heartbeat: event.agentRef.heartbeat || "0 9 * * 1-5", active: event.agentRef.active,
+      });
+    }
+  }
+
+  function navigateCalendar(direction: -1 | 0 | 1) {
+    if (direction === 0) { setCalendarAnchor(new Date()); return; }
+    setCalendarAnchor((prev) => {
+      const next = new Date(prev);
+      if (calendarMode === "day") next.setDate(next.getDate() + direction);
+      else if (calendarMode === "week") next.setDate(next.getDate() + direction * 7);
+      else next.setMonth(next.getMonth() + direction);
+      return next;
+    });
+  }
+
+  const calendarLabel = useMemo(() => {
+    const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    if (calendarMode === "day") return calendarAnchor.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+    if (calendarMode === "month") return `${months[calendarAnchor.getMonth()]} ${calendarAnchor.getFullYear()}`;
+    const s = new Date(calendarAnchor); const dow = s.getDay(); s.setDate(s.getDate() - (dow === 0 ? 6 : dow - 1));
+    const e = new Date(s); e.setDate(e.getDate() + 6);
+    return s.getMonth() === e.getMonth() ? `${months[s.getMonth()]} ${s.getDate()}–${e.getDate()}, ${s.getFullYear()}` : `${months[s.getMonth()]} ${s.getDate()} – ${months[e.getMonth()]} ${e.getDate()}`;
+  }, [calendarAnchor, calendarMode]);
+
+  async function runScheduleJob() {
+    if (!scheduleJobDialog) return;
+    setScheduleDialogBusy(true);
+    try {
+      const res = await fetch(`/api/agents/${scheduleJobDialog.agentSlug}/jobs/${scheduleJobDialog.draft.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run", cabinetPath: scheduleJobDialog.cabinetPath }),
+      });
+      if (res.ok) setScheduleJobDialog(null);
+    } finally { setScheduleDialogBusy(false); }
+  }
+
+  async function saveScheduleJob() {
+    if (!scheduleJobDialog) return;
+    setScheduleDialogSaving(true);
+    try {
+      const query = `?cabinetPath=${encodeURIComponent(scheduleJobDialog.cabinetPath)}`;
+      await fetch(`/api/agents/${scheduleJobDialog.agentSlug}/jobs/${scheduleJobDialog.draft.id}${query}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(scheduleJobDialog.draft),
+      });
+      setScheduleJobDialog(null);
+      void refreshOverview();
+    } finally { setScheduleDialogSaving(false); }
+  }
+
+  async function runScheduleHeartbeat() {
+    if (!scheduleHeartbeatDialog) return;
+    setScheduleDialogBusy(true);
+    try {
+      await fetch(`/api/agents/personas/${scheduleHeartbeatDialog.agentSlug}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run", cabinetPath: scheduleHeartbeatDialog.cabinetPath }),
+      });
+      setScheduleHeartbeatDialog(null);
+    } finally { setScheduleDialogBusy(false); }
+  }
+
+  async function saveScheduleHeartbeat() {
+    if (!scheduleHeartbeatDialog) return;
+    setScheduleDialogSaving(true);
+    try {
+      await fetch(`/api/agents/personas/${scheduleHeartbeatDialog.agentSlug}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ heartbeat: scheduleHeartbeatDialog.heartbeat, active: scheduleHeartbeatDialog.active, cabinetPath: scheduleHeartbeatDialog.cabinetPath }),
+      });
+      setScheduleHeartbeatDialog(null);
+      void refreshOverview();
+    } finally { setScheduleDialogSaving(false); }
+  }
+
   const cabinetName =
     overview?.cabinet.name ||
     (effectiveCabinetPath === ROOT_CABINET_PATH
@@ -1210,6 +1322,33 @@ export function TasksBoard({
               </Select>
             ) : null}
 
+            <div className="flex items-center rounded-lg border border-border/60 p-0.5">
+              <button
+                onClick={() => setBoardView("board")}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
+                  boardView === "board"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <KanbanSquare className="h-3.5 w-3.5" />
+                Board
+              </button>
+              <button
+                onClick={() => setBoardView("schedule")}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
+                  boardView === "schedule"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Calendar className="h-3.5 w-3.5" />
+                Schedule
+              </button>
+            </div>
+
             <Button
               variant="outline"
               size="sm"
@@ -1251,6 +1390,7 @@ export function TasksBoard({
         onStartNow={() => void handleStartFromDialog()}
       />
 
+      {boardView === "board" ? (
       <div className="min-h-0 flex-1 overflow-x-auto">
           {loading ? (
             <div className="flex h-full items-center justify-center gap-3 text-sm text-muted-foreground">
@@ -1413,6 +1553,149 @@ export function TasksBoard({
             </div>
           )}
         </div>
+      ) : (
+        <div className={cn(
+          calendarFullscreen
+            ? "fixed inset-0 z-50 overflow-y-auto bg-background px-6 py-6"
+            : "min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6"
+        )}>
+          {/* Calendar controls */}
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <div className="flex items-center rounded-lg border border-border/60 p-0.5">
+              {(["day", "week", "month"] as CalendarMode[]).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setCalendarMode(m)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-[11px] font-medium capitalize transition-colors",
+                    calendarMode === m
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button onClick={() => navigateCalendar(-1)} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground">
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button onClick={() => navigateCalendar(0)} className="rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground">
+                Today
+              </button>
+              <button onClick={() => navigateCalendar(1)} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground">
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+
+            <span className="text-sm font-medium text-foreground">{calendarLabel}</span>
+
+            <button
+              onClick={() => setCalendarFullscreen((v) => !v)}
+              className="ml-auto flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+              title={calendarFullscreen ? "Exit full screen" : "Full screen"}
+            >
+              {calendarFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+
+          <ScheduleCalendar
+            mode={calendarMode}
+            anchor={calendarAnchor}
+            agents={overview?.agents || []}
+            jobs={overview?.jobs || []}
+            fullscreen={calendarFullscreen}
+            onEventClick={handleScheduleEventClick}
+            onDayClick={(date) => { setCalendarMode("day"); setCalendarAnchor(date); }}
+          />
+        </div>
+      )}
+
+      {/* Schedule job dialog */}
+      {scheduleJobDialog ? (
+        <Dialog open onOpenChange={(open) => { if (!open) setScheduleJobDialog(null); }}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <div className="flex items-center justify-between gap-3 pr-10">
+                <DialogTitle className="flex items-center gap-2">
+                  <Clock3 className="h-4 w-4 text-emerald-400" />
+                  {scheduleJobDialog.draft.name || "Job"}
+                  <span className="text-[11px] font-normal text-muted-foreground">· {scheduleJobDialog.agentName}</span>
+                </DialogTitle>
+                <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => void runScheduleJob()} disabled={scheduleDialogBusy}>
+                  {scheduleDialogBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                  Run now
+                </Button>
+              </div>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">Schedule</span>
+                <SchedulePicker value={scheduleJobDialog.draft.schedule || "0 9 * * 1-5"} onChange={(cron) => setScheduleJobDialog((p) => p ? { ...p, draft: { ...p.draft, schedule: cron } } : p)} />
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">Prompt</span>
+                <textarea value={scheduleJobDialog.draft.prompt} onChange={(e) => setScheduleJobDialog((p) => p ? { ...p, draft: { ...p.draft, prompt: e.target.value } } : p)} className="h-48 w-full resize-none rounded-lg bg-muted/60 px-3 py-2 text-[13px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:bg-muted" placeholder="What should this job do?" />
+              </div>
+              <div className="flex items-center justify-between border-t border-border pt-3">
+                <label className="flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground">
+                  <input type="checkbox" checked={scheduleJobDialog.draft.enabled} onChange={(e) => setScheduleJobDialog((p) => p ? { ...p, draft: { ...p.draft, enabled: e.target.checked } } : p)} />
+                  Enabled
+                </label>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setScheduleJobDialog(null)}>Cancel</Button>
+                  <Button size="sm" className="h-8 gap-1 text-xs" onClick={() => void saveScheduleJob()} disabled={scheduleDialogSaving}>
+                    <Save className="h-3.5 w-3.5" />
+                    {scheduleDialogSaving ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+
+      {/* Schedule heartbeat dialog */}
+      {scheduleHeartbeatDialog ? (
+        <Dialog open onOpenChange={(open) => { if (!open) setScheduleHeartbeatDialog(null); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <div className="flex items-center justify-between gap-3 pr-10">
+                <DialogTitle className="flex items-center gap-2">
+                  <HeartPulse className="h-4 w-4 text-pink-400" />
+                  Heartbeat
+                  <span className="text-[11px] font-normal text-muted-foreground">· {scheduleHeartbeatDialog.agentName}</span>
+                </DialogTitle>
+                <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => void runScheduleHeartbeat()} disabled={scheduleDialogBusy}>
+                  {scheduleDialogBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                  Run now
+                </Button>
+              </div>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">Schedule</span>
+                <SchedulePicker value={scheduleHeartbeatDialog.heartbeat} onChange={(cron) => setScheduleHeartbeatDialog((p) => p ? { ...p, heartbeat: cron } : p)} />
+              </div>
+              <div className="flex items-center justify-between border-t border-border pt-3">
+                <label className="flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground">
+                  <input type="checkbox" checked={scheduleHeartbeatDialog.active} onChange={(e) => setScheduleHeartbeatDialog((p) => p ? { ...p, active: e.target.checked } : p)} className="h-3.5 w-3.5 cursor-pointer appearance-none rounded-sm border border-border bg-background transition-colors checked:border-primary checked:bg-primary focus:outline-none focus:ring-1 focus:ring-ring focus:ring-offset-1" />
+                  Active
+                </label>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setScheduleHeartbeatDialog(null)}>Cancel</Button>
+                  <Button size="sm" className="h-8 gap-1 text-xs" onClick={() => void saveScheduleHeartbeat()} disabled={scheduleDialogSaving}>
+                    <Save className="h-3.5 w-3.5" />
+                    {scheduleDialogSaving ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
