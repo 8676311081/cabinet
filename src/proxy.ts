@@ -8,41 +8,35 @@ async function hashToken(password: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const password = process.env.KB_PASSWORD || "";
 
-  // Auth disabled — no password set
   if (!password) {
     return NextResponse.next();
   }
 
   const { pathname } = req.nextUrl;
 
-  // Allow login page and login API
   if (pathname === "/login" || pathname === "/api/auth/login" || pathname === "/api/auth/check") {
     return NextResponse.next();
   }
 
-  // Allow health check
   if (pathname.startsWith("/api/health")) {
     return NextResponse.next();
   }
 
-  // Passthrough multica API and auth routes (handled by multica Go server)
   if (pathname.startsWith("/multica-api/") || pathname.startsWith("/multica-auth/")) {
     return NextResponse.next();
   }
 
-  // Check auth cookie
   const token = req.cookies.get("kb-auth")?.value;
   const expected = await hashToken(password);
 
   if (token !== expected) {
-    // API routes return 401
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    // Pages redirect to login
+
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
@@ -51,7 +45,6 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    // Protect all routes except static files and Next.js internals
     "/((?!_next/static|_next/image|favicon.ico).*)",
   ],
 };
