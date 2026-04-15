@@ -64,42 +64,191 @@
 
 ## 安装
 
-### macOS（推荐）
+### 方式一：下载 DMG（普通用户，最简单）
 
-从 [Releases](https://github.com/8676311081/cabinet/releases) 下载 DMG，双击安装。
+1. 从 [Releases](https://github.com/8676311081/cabinet/releases) 下载 `Cabinet-xxx-arm64.dmg`
+2. 双击安装，拖到 Applications
+3. 打开 Cabinet，等几秒自动初始化完成
 
-启动后 Cabinet 会自动：
-- 启动嵌入式 multica-server（端口 18080）
-- 创建默认用户和认证 token
-- 初始化知识库
+> Cabinet 会自动启动内嵌的 multica-server（端口 18080）、创建默认用户和认证 token、初始化知识库。你不需要配置任何东西。
 
-### 启动 Agent Daemon
+4. 安装 Agent 运行依赖（至少装一个）：
 
-Agent 需要 daemon 进程来执行任务：
+```bash
+# Claude Code（推荐）
+npm install -g @anthropic-ai/claude-code
+# 首次运行需要登录
+claude
+
+# 或者 Codex
+npm install -g @openai/codex
+```
+
+5. 安装并启动 Agent Daemon：
 
 ```bash
 # 安装 multica CLI
 brew install multica-ai/tap/multica
 
-# 登录并配置
+# 登录到 Cabinet 的内嵌 server
 multica auth login --server-url http://localhost:18080
-multica workspace watch <workspace-id>
+# 输入 PAT token（在 Cabinet 应用的终端里运行以下命令获取）：
+# cat ~/Library/Application\ Support/cabinet/multica-pat.json
 
-# 启动 daemon
+# 选择要监听的 workspace
+multica workspace list                          # 查看 workspace ID
+multica workspace watch <workspace-id>          # 开始监听
+
+# 启动 daemon（保持运行）
 multica daemon start --foreground
 ```
 
-需要至少一个 AI CLI：
-- **Claude Code**: `npm i -g @anthropic-ai/claude-code`
-- **Codex**: `npm i -g @openai/codex`
+6. 完成！在 Cabinet 里创建 Issue 并 assign 给 Agent，它会自动执行任务。
 
-### 从源码运行
+---
+
+### 方式二：从源码运行（开发者）
+
+适合想修改代码、调试或二次开发的人。
+
+#### 环境要求
+
+| 依赖 | 版本 | 安装 |
+|------|------|------|
+| Node.js | 20+ | `brew install node` |
+| Go | 1.26+ | `brew install go` |
+| PostgreSQL | 17 | `brew install postgresql@17`（或用 Docker） |
+| pnpm | 9+ | `npm install -g pnpm` |
+| 至少一个 AI CLI | | Claude Code 或 Codex（见上面） |
+
+#### 第一步：克隆项目
 
 ```bash
 git clone https://github.com/8676311081/cabinet.git
 cd cabinet
 npm install
-npm run dev:all
+```
+
+#### 第二步：启动 Multica 后端
+
+Cabinet 的事项管理、Agent 调度等功能由 Multica 后端提供。你需要单独启动它：
+
+```bash
+# 克隆 multica（如果还没有）
+cd ..
+git clone https://github.com/multica-ai/multica.git
+cd multica
+
+# 启动数据库 + 运行迁移
+make setup        # 首次：创建数据库、运行迁移
+make dev          # 启动 Go 后端（端口 8080）
+```
+
+> `make setup` 会自动启动 PostgreSQL Docker 容器、创建 `multica` 数据库、运行所有迁移。
+> 如果你不用 Docker，确保本地 PostgreSQL 在运行，然后编辑 `.env` 里的 `DATABASE_URL`。
+
+#### 第三步：配置 Cabinet 连接 Multica
+
+```bash
+cd ../cabinet
+cp .env.example .env.local
+```
+
+编辑 `.env.local`：
+
+```bash
+# 指向你的 multica 后端
+MULTICA_API_URL=http://localhost:8080
+NEXT_PUBLIC_MULTICA_API_URL=/multica-api
+NEXT_PUBLIC_MULTICA_WS_URL=ws://localhost:8080/ws
+
+# 认证 token（从 multica 获取）
+# 先在 multica 里创建用户并获取 PAT：
+#   cd multica/server
+#   multica auth login
+#   multica config show   # 查看 token
+# 把 token 填到这里：
+NEXT_PUBLIC_MULTICA_PAT=mul_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+> **如何获取 PAT token**：
+> ```bash
+> cd multica/server
+> go run ./cmd/multica auth login    # 浏览器登录
+> go run ./cmd/multica config show   # 显示 token
+> ```
+> 复制 `token` 字段的值填到 `.env.local` 的 `NEXT_PUBLIC_MULTICA_PAT` 里。
+
+#### 第四步：启动 Cabinet
+
+```bash
+npm run dev:all    # 启动 Next.js（3000）+ Cabinet Daemon（3001）
+```
+
+打开 http://localhost:3000，应该能看到知识库和 Multica 的事项/收件箱。
+
+#### 第五步：启动 Agent Daemon
+
+```bash
+cd ../multica/server
+
+# 监听 workspace
+go run ./cmd/multica workspace list              # 查看 workspace ID
+go run ./cmd/multica workspace watch <ws-id>     # 开始监听
+
+# 启动 daemon
+go run ./cmd/multica daemon start --foreground
+```
+
+Daemon 启动后会自动：
+- 注册 runtime（Claude/Codex/OpenCode）
+- 开始轮询任务队列
+- 认领并执行被 assign 给 Agent 的 Issue
+
+#### 第六步：验证
+
+1. 在 Cabinet 左侧点"事项"
+2. 点 board 列头的 "+" 创建一个 Issue
+3. Assign 给一个 Agent
+4. 在 Issue 详情页看 Agent 实时工作过程
+5. 完成后检查知识库是否有新文档
+
+#### 目录结构
+
+```
+cabinet/                    # 前端 + Electron 桌面应用
+├── src/                   # Next.js 源码
+├── electron/              # Electron 主进程
+├── packages/
+│   ├── multica-core/      # Multica 数据层（API、Store、Hook）
+│   ├── multica-views/     # Multica UI 组件（Issue、Inbox 等）
+│   └── multica-ui/        # 基础 UI 组件（shadcn/base-ui）
+├── server/                # Cabinet Daemon（终端、定时任务）
+└── data/                  # 知识库文件（Markdown）
+
+multica/                    # 后端 + CLI + Agent 运行时
+└── server/
+    ├── cmd/server/        # HTTP API 服务
+    ├── cmd/multica/       # CLI 工具
+    ├── internal/daemon/   # Agent Daemon（任务执行引擎）
+    ├── internal/handler/  # API Handler
+    ├── pkg/agent/         # Agent 后端（Claude/Codex/OpenCode）
+    └── migrations/        # 数据库迁移
+```
+
+#### 常用命令
+
+```bash
+# Cabinet
+npm run dev:all            # 启动 Cabinet 开发服务
+npm run build              # 生产构建
+npm run electron:package   # 打包 Electron 应用
+
+# Multica
+make dev                   # 启动后端
+make test                  # 运行测试
+make sqlc                  # 重新生成 SQL 代码（修改 queries/ 后需要）
+make daemon                # 启动 daemon
 ```
 
 ---
