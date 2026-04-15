@@ -1,5 +1,9 @@
 # Progress
 
+[2026-04-15] Added "Create Task" mode to the home screen. Users can now toggle between "创建任务" (task) and "对话" (chat) modes. In task mode, submitting the prompt creates a Multica issue via the `/multica-api/issues` proxy, with an agent selector dropdown for assignment. After creation, navigates to the issue detail view. Uses existing `multica_token` and `multica_workspace_id` from localStorage for auth, with Electron preload PAT fallback. Polished layout: greeting and subtitle separated, mode toggle and agent selector on one row, Chinese quick actions per mode, cleaner input area with send button at bottom-right.
+
+[2026-04-15] Implemented Multica daemon task execution. Added `server/multica-poller.ts` — a self-contained task poller that scans agent personas for `multica_runtime_id`, polls `POST /api/daemon/runtimes/{id}/tasks/claim` every 30s, executes claimed tasks as PTY sessions via the cabinet daemon, and reports completion/failure back to Multica via the daemon API. Integrated into `cabinet-daemon.ts` (starts after HTTP server, stops on SIGINT, reloads on persona.md changes). Added `multica_runtime_id` field to `AgentPersona` type. Updated `.env.example` with `MULTICA_PAT` instructions.
+
 [2026-04-11] Added Storage tab to Settings with data directory picker. Users can view the current data dir path, browse for a new one, or type a path manually. The setting is persisted to `.cabinet-install.json` and read by `getManagedDataDir()` at startup (env var still takes priority). A restart banner shows when the path changes. Also updated the About tab to show the actual data dir path.
 
 [2026-04-11] Added Mermaid diagram viewer for .mermaid and .mmd files. Renders diagrams with the mermaid library, supports source toggle, copy source, and SVG export. Follows the current Cabinet theme (dark/light). Shows error state with fallback to source view if rendering fails.

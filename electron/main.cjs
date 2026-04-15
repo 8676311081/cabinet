@@ -21,7 +21,16 @@ if (!gotSingleInstanceLock) {
 }
 
 const isDev = !app.isPackaged;
-const managedDataDir = process.env.CABINET_DATA_DIR || path.join(app.getPath("userData"), "cabinet-data");
+const managedDataDir = (() => {
+  if (process.env.CABINET_DATA_DIR) return process.env.CABINET_DATA_DIR;
+  // Read user-configured data dir from cabinet-data-dir.txt (set via Settings > Storage)
+  try {
+    const txtPath = path.join(app.getPath("userData"), "cabinet-data-dir.txt");
+    const dir = fs.readFileSync(txtPath, "utf-8").trim();
+    if (dir && fs.existsSync(dir)) return dir;
+  } catch {}
+  return path.join(app.getPath("userData"), "cabinet-data");
+})();
 const updateStatusPath = path.join(managedDataDir, ".cabinet", "update-status.json");
 let mainWindow = null;
 let backendChildren = [];
