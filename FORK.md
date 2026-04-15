@@ -9,14 +9,14 @@
 - Markdown 文件系统 + WYSIWYG 编辑器
 - 本地 AI Agent 面板（Claude CLI 集成）
 - Electron 桌面应用
-- MIT License
+- 上游未指定显式 License
 
 ### 2. [Multica](https://github.com/multica-ai/multica) by Multica AI
 - AI-native 任务管理平台（类似 Linear）
 - Agent 作为一等公民：可以被 assign issue、执行任务、回复评论
 - 本地 Daemon 运行时 + 多 Agent 调度
 - Go 后端 + Next.js 前端 monorepo
-- MIT License
+- Modified Apache 2.0 License（禁止未授权的 SaaS 托管）
 
 ## 本 Fork 的改动
 
@@ -75,4 +75,5 @@ multica daemon start --foreground
 
 ## License
 
-本 Fork 遵循上游项目的 MIT License。
+本 Fork 遵循上游项目的 License 条款。详见 [LICENSE](LICENSE) 文件。
+Multica 部分使用 Modified Apache 2.0（禁止未授权 SaaS 托管），仅限个人/内部使用。

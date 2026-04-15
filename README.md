@@ -156,4 +156,8 @@ npm run dev:all
 
 ## License
 
-MIT License — 遵循上游项目的开源协议。
+- **Cabinet** 上游未指定显式 License
+- **Multica** 使用 Modified Apache 2.0（禁止未授权 SaaS 托管，内部使用 OK）
+- 本 Fork 的修改部分采用 Apache 2.0
+
+详见 [LICENSE](LICENSE) 文件。本项目仅供个人/内部使用，不作为商业托管服务。
