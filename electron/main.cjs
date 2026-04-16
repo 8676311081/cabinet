@@ -21,19 +21,25 @@ if (!gotSingleInstanceLock) {
 }
 
 const isDev = !app.isPackaged;
+let missingConfiguredDataDir = null;
 const managedDataDir = (() => {
   if (process.env.CABINET_DATA_DIR) return process.env.CABINET_DATA_DIR;
   // Read user-configured data dir from cabinet-data-dir.txt (set via Settings > Storage)
   try {
     const txtPath = path.join(app.getPath("userData"), "cabinet-data-dir.txt");
     const dir = fs.readFileSync(txtPath, "utf-8").trim();
-    if (dir && fs.existsSync(dir)) return dir;
+    if (dir) {
+      if (fs.existsSync(dir)) return dir;
+      missingConfiguredDataDir = dir;
+      console.warn(`[cabinet] Configured data directory does not exist: ${dir}`);
+    }
   } catch {}
   return path.join(app.getPath("userData"), "cabinet-data");
 })();
 const updateStatusPath = path.join(managedDataDir, ".cabinet", "update-status.json");
 let mainWindow = null;
 let backendChildren = [];
+let closingFromBackendFailure = false;
 
 function writeUpdateStatus(status) {
   fs.mkdirSync(path.dirname(updateStatusPath), { recursive: true });
@@ -45,6 +51,8 @@ function tryPort(port) {
     const server = net.createServer();
     server.once("error", reject);
     server.listen(port, "127.0.0.1", () => {
+      // TODO: This probe has an unavoidable TOCTOU gap between close() and the real bind.
+      // Node.js does not provide an atomic loopback port reservation API for this handoff.
       server.close(() => resolve(port));
     });
   });
@@ -83,6 +91,42 @@ async function waitForHealth(url, timeoutMs = 45_000) {
   }
 
   throw new Error(`Timed out waiting for Cabinet at ${url}`);
+}
+
+function multicaPatFilePath() {
+  return path.join(app.getPath("userData"), "multica-pat.json");
+}
+
+function readMulticaPatFromFile() {
+  try {
+    const patFile = multicaPatFilePath();
+    if (!fs.existsSync(patFile)) return null;
+    const raw = fs.readFileSync(patFile, "utf8");
+    const data = JSON.parse(raw);
+    const token = typeof data?.token === "string" ? data.token.trim() : "";
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeMulticaPatToFile(token) {
+  const patFile = multicaPatFilePath();
+  fs.writeFileSync(patFile, JSON.stringify({ token }), "utf8");
+  fs.chmodSync(patFile, 0o600);
+}
+
+async function waitForMulticaPat(timeoutMs = 8_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const token = process.env.MULTICA_PAT || readMulticaPatFromFile();
+    if (token) {
+      process.env.MULTICA_PAT = token;
+      return token;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return null;
 }
 
 function spawnBackend(command, args, env) {
@@ -246,10 +290,10 @@ async function startMulticaServer() {
     const match = text.match(/MULTICA_PAT=(\S+)/);
     if (match) {
       capturedPAT = match[1];
-      console.log(`[multica] Captured PAT: ${capturedPAT.slice(0, 12)}...`);
-      // Save to userData for preload to read.
-      const patFile = path.join(app.getPath("userData"), "multica-pat.json");
-      fs.writeFileSync(patFile, JSON.stringify({ token: capturedPAT }));
+      process.env.MULTICA_PAT = capturedPAT;
+      console.log(`[multica] PAT captured (${capturedPAT.length} chars)`);
+      // Save to userData for preload and backend children to read.
+      writeMulticaPatToFile(capturedPAT);
     }
     // Forward other output to console.
     for (const line of text.split("\n").filter(Boolean)) {
@@ -274,6 +318,11 @@ async function startMulticaServer() {
       void healthErr;
     }
     console.log(`[multica] Server is ready on port ${multicaPort}`);
+    // Ensure backend children inherit MULTICA_PAT at spawn time.
+    const token = capturedPAT || await waitForMulticaPat(5_000);
+    if (!token) {
+      console.warn("[multica] MULTICA_PAT not available yet; daemon may start without PAT");
+    }
     return multicaPort;
   } catch (err) {
     console.error(`[multica] Server failed to become healthy: ${err.message}`);
@@ -310,6 +359,10 @@ async function startEmbeddedCabinet() {
     CABINET_DAEMON_URL: daemonOrigin,
     CABINET_PUBLIC_DAEMON_ORIGIN: daemonWsOrigin,
   };
+  const patForChildren = process.env.MULTICA_PAT || readMulticaPatFromFile();
+  if (patForChildren) {
+    env.MULTICA_PAT = patForChildren;
+  }
 
   const serverEntry = packagedStandalonePath("server.js");
   const daemonEntry = packagedStandalonePath("server", "cabinet-daemon.cjs");
@@ -322,6 +375,13 @@ async function startEmbeddedCabinet() {
 
   const serverChild = spawnNodeBackend([serverEntry], env);
   const daemonChild = spawnNodeBackend([daemonEntry], daemonEnv);
+
+  serverChild.on("exit", (code, signal) => {
+    handleCriticalBackendExit("Next.js server", code, signal, daemonChild);
+  });
+  daemonChild.on("exit", (code, signal) => {
+    handleCriticalBackendExit("Cabinet daemon", code, signal, serverChild);
+  });
 
   // Race: either health check succeeds or a backend crashes early
   const earlyExit = (label, child) =>
@@ -439,6 +499,29 @@ function cleanupBackends() {
   backendChildren = [];
 }
 
+function terminateChild(child) {
+  if (!child || child.killed) {
+    return;
+  }
+  try {
+    child.kill("SIGTERM");
+  } catch {}
+}
+
+function handleCriticalBackendExit(label, code, signal, peerChild) {
+  if (closingFromBackendFailure || !app.isReady()) {
+    return;
+  }
+  if (typeof code !== "number" || code === 0) {
+    return;
+  }
+
+  closingFromBackendFailure = true;
+  console.error(`[cabinet] ${label} exited unexpectedly (code=${code}, signal=${signal})`);
+  terminateChild(peerChild);
+  app.quit();
+}
+
 async function createWindow() {
   // If MULTICA_API_URL is already set (e.g. dev server on 8080), skip embedded server
   // so Cabinet shares the same database as the daemon.
@@ -502,6 +585,15 @@ app.on("second-instance", () => {
 });
 
 app.whenReady().then(async () => {
+  if (missingConfiguredDataDir) {
+    dialog.showMessageBox({
+      type: "warning",
+      title: "Storage Location Unavailable",
+      message: "The configured Cabinet data directory does not exist.",
+      detail: `Cabinet could not find:\n${missingConfiguredDataDir}\n\nCabinet will use the default local data directory instead. Update it in Settings > Storage if needed.`,
+      buttons: ["OK"],
+    }).catch(() => {});
+  }
   await createWindow();
   configureAutoUpdates();
 

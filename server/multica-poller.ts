@@ -19,12 +19,58 @@ import { getOrCreateDaemonToken } from "../src/lib/agents/daemon-auth";
 // ---------------------------------------------------------------------------
 
 const MULTICA_API_URL = (process.env.MULTICA_API_URL || "http://localhost:8080").replace(/\/+$/, "");
-const MULTICA_PAT = process.env.MULTICA_PAT || "";
 const POLL_INTERVAL_MS = 30_000;     // 30s between task polls per agent
 const TASK_TIMEOUT_MS = 30 * 60_000; // 30 min max execution per task
 const WAIT_POLL_MS = 3_000;          // 3s between session-output polls
 
 const AGENTS_DIR = path.join(DATA_DIR, ".agents");
+
+function readMulticaPATFile(filePath: string): string {
+  try {
+    if (!fs.existsSync(filePath)) return "";
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const data = JSON.parse(raw) as { token?: unknown };
+    return typeof data.token === "string" ? data.token.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+function multicaPATCandidates(): string[] {
+  const candidates = new Set<string>();
+  candidates.add(path.resolve(DATA_DIR, "..", "multica-pat.json"));
+
+  if (process.env.CABINET_DATA_DIR) {
+    candidates.add(path.resolve(process.env.CABINET_DATA_DIR, "..", "multica-pat.json"));
+  }
+
+  const home = process.env.HOME || "";
+  if (home) {
+    candidates.add(path.join(home, "Library", "Application Support", "cabinet", "multica-pat.json"));
+    candidates.add(path.join(home, "Library", "Application Support", "Cabinet", "multica-pat.json"));
+  }
+
+  const appData = process.env.APPDATA || "";
+  if (appData) {
+    candidates.add(path.join(appData, "cabinet", "multica-pat.json"));
+    candidates.add(path.join(appData, "Cabinet", "multica-pat.json"));
+  }
+
+  return [...candidates];
+}
+
+function getMulticaPAT(): string {
+  for (const candidate of multicaPATCandidates()) {
+    const token = readMulticaPATFile(candidate);
+    if (token) {
+      process.env.MULTICA_PAT = token;
+      return token;
+    }
+  }
+
+  const envPat = process.env.MULTICA_PAT?.trim();
+  return envPat || "";
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -77,7 +123,8 @@ let pollerActive = false;
 
 function multicaHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (MULTICA_PAT) h["Authorization"] = `Bearer ${MULTICA_PAT}`;
+  const multicaPAT = getMulticaPAT();
+  if (multicaPAT) h["Authorization"] = `Bearer ${multicaPAT}`;
   return h;
 }
 
@@ -213,6 +260,9 @@ function scanPersonas(): PersonaSummary[] {
 // ---------------------------------------------------------------------------
 
 function buildTaskPrompt(task: MulticaTask, persona: PersonaSummary): string {
+  // TODO: Prompt injection is inherent here because user-controlled task/chat content is
+  // intentionally sent to the agent. Mitigate with least-privilege tooling, sandboxing,
+  // explicit confirmation for high-impact actions, and downstream validation/auditing.
   const lines: string[] = [];
 
   // Persona body / instructions
@@ -395,7 +445,7 @@ function scheduleNextPoll(state: AgentState): void {
 
 /** Reload personas and (re)start polling for those with multica_runtime_id. */
 export function reloadMulticaPoller(): void {
-  if (!MULTICA_PAT) {
+  if (!getMulticaPAT()) {
     // Don't spam logs on every reload if PAT is not configured
     return;
   }
@@ -430,7 +480,7 @@ export function reloadMulticaPoller(): void {
 
 /** Start the Multica task poller. Call after the daemon HTTP server is listening. */
 export function startMulticaPoller(): void {
-  if (!MULTICA_PAT) {
+  if (!getMulticaPAT()) {
     console.log("[multica-poller] MULTICA_PAT not set — task polling disabled");
     return;
   }

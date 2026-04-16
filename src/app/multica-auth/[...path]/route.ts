@@ -6,6 +6,15 @@ function multicaBaseUrl(): string {
   return (process.env.MULTICA_API_URL || "http://localhost:8080").replace(/\/+$/, "");
 }
 
+function isLocalhostUrl(urlValue: string): boolean {
+  try {
+    const url = new URL(urlValue);
+    return url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
 function copyHeaders(req: NextRequest): Headers {
   const headers = new Headers(req.headers);
   headers.delete("host");
@@ -15,6 +24,13 @@ function copyHeaders(req: NextRequest): Headers {
 
 async function proxyRequest(req: NextRequest, pathSegments: string[]): Promise<NextResponse> {
   const baseUrl = multicaBaseUrl();
+  if (!isLocalhostUrl(baseUrl)) {
+    return NextResponse.json(
+      { error: "MULTICA_API_URL must point to localhost or 127.0.0.1" },
+      { status: 403 }
+    );
+  }
+
   const target = `${baseUrl}/auth/${pathSegments.join("/")}${req.nextUrl.search}`;
 
   const method = req.method.toUpperCase();
@@ -76,4 +92,3 @@ export async function OPTIONS(req: NextRequest, ctx: RouteContext) {
   const { path } = await ctx.params;
   return proxyRequest(req, path || []);
 }
-

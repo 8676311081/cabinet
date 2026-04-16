@@ -1,11 +1,20 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { GitBranch, RefreshCw, Check, CloudDownload, Star, X } from "lucide-react";
+import { GitBranch, RefreshCw, Check, CloudDownload, Star, X, Loader2 } from "lucide-react";
 import { useCabinetUpdate } from "@/hooks/use-cabinet-update";
 import { useEditorStore } from "@/stores/editor-store";
 import { useTreeStore } from "@/stores/tree-store";
 import { useAppStore } from "@/stores/app-store";
+
+interface RunningTask {
+  issueId: string;
+  identifier: string;
+  title: string;
+  status: string;
+  agentName: string;
+  startedAt: number;
+}
 
 const DISCORD_SUPPORT_URL = "https://discord.gg/hJa5TRTbTH";
 const GITHUB_REPO_URL = "https://github.com/hilash/cabinet";
@@ -53,18 +62,21 @@ export function StatusBar() {
   const didAutoPullRef = useRef(false);
   const [appAlive, setAppAlive] = useState(true);
   const [daemonAlive, setDaemonAlive] = useState(true);
+  const [multicaAlive, setMulticaAlive] = useState(true);
   const [installKind, setInstallKind] = useState<"source-managed" | "source-custom" | "electron-macos">("source-custom");
   const [showServerPopup, setShowServerPopup] = useState(false);
   const [providerStatuses, setProviderStatuses] = useState<
     { id: string; name: string; available: boolean; authenticated: boolean }[]
   >([]);
   const [providersLoaded, setProvidersLoaded] = useState(false);
+  const [runningTasks, setRunningTasks] = useState<RunningTask[]>([]);
   const { update } = useCabinetUpdate();
 
   const anyProviderReady = useMemo(
     () => !providersLoaded || providerStatuses.some((p) => p.available && p.authenticated),
     [providersLoaded, providerStatuses],
   );
+  const allSystemsHealthy = appAlive && daemonAlive && multicaAlive && anyProviderReady;
 
   const fetchProviderStatus = useCallback(async () => {
     try {
@@ -82,14 +94,16 @@ export function StatusBar() {
   useEffect(() => {
     let mounted = true;
     const checkHealth = async () => {
-      const [appRes, daemonRes] = await Promise.allSettled([
+      const [appRes, daemonRes, multicaRes] = await Promise.allSettled([
         fetch("/api/health", { cache: "no-store" }),
         fetch("/api/health/daemon", { cache: "no-store" }),
+        fetch("/multica-api/health", { cache: "no-store" }),
       ]);
       if (!mounted) return;
       const appOk = appRes.status === "fulfilled" && appRes.value.ok;
       setAppAlive(appOk);
       setDaemonAlive(daemonRes.status === "fulfilled" && daemonRes.value.ok);
+      setMulticaAlive(multicaRes.status === "fulfilled" && multicaRes.value.ok);
       if (appOk && appRes.status === "fulfilled") {
         try {
           const data = await appRes.value.json();
@@ -103,6 +117,59 @@ export function StatusBar() {
       mounted = false;
       clearInterval(interval);
     };
+  }, []);
+
+  // Poll Multica for running tasks
+  useEffect(() => {
+    let mounted = true;
+    const checkRunningTasks = async () => {
+      try {
+        const token = typeof window !== "undefined" ? localStorage.getItem("multica_token") : null;
+        const wsId = typeof window !== "undefined" ? localStorage.getItem("multica_workspace_id") : null;
+        if (!token || !wsId) {
+          if (mounted) setRunningTasks([]);
+          return;
+        }
+
+        const headers: Record<string, string> = {
+          "Authorization": `Bearer ${token}`,
+          "X-Workspace-ID": wsId,
+        };
+
+        const params = new URLSearchParams({ workspace_id: wsId, open_only: "true" });
+        const res = await fetch(`/multica-api/issues?${params}`, { headers, cache: "no-store" });
+        if (!mounted) return;
+        if (!res.ok) {
+          setRunningTasks([]);
+          return;
+        }
+        const data = await res.json();
+        const issues = Array.isArray(data) ? data : data?.issues || [];
+
+        // Get agents for name lookup
+        const agentsRes = await fetch(`/multica-api/agents?workspace_id=${wsId}`, { headers, cache: "no-store" });
+        const agents: Array<{ id: string; name: string }> = agentsRes.ok ? await agentsRes.json() : [];
+        const agentMap = new Map(agents.map((a) => [a.id, a.name]));
+
+        const running = issues
+          .filter((i: { status: string }) => i.status === "in_progress" || i.status === "dispatched")
+          .map((i: { id: string; identifier: string; title: string; status: string; assignee_id?: string; updated_at?: string }) => ({
+            issueId: i.id,
+            identifier: i.identifier,
+            title: i.title,
+            status: i.status,
+            agentName: i.assignee_id ? agentMap.get(i.assignee_id) || "Agent" : "",
+            startedAt: i.updated_at ? new Date(i.updated_at).getTime() : Date.now(),
+          }));
+
+        if (mounted) setRunningTasks(running);
+      } catch {
+        if (mounted) setRunningTasks([]);
+      }
+    };
+    void checkRunningTasks();
+    const interval = setInterval(checkRunningTasks, 8000);
+    return () => { mounted = false; clearInterval(interval); };
   }, []);
 
   // Fetch provider status once on mount
@@ -218,17 +285,19 @@ export function StatusBar() {
               });
             }}
             className={`flex items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors cursor-pointer ${
-              appAlive && daemonAlive && anyProviderReady
+              allSystemsHealthy
                 ? "text-green-500 hover:bg-green-500/10"
                 : !appAlive
                 ? "text-red-500 hover:bg-red-500/10"
                 : "text-amber-500 hover:bg-amber-500/10"
             }`}
             title={
-              appAlive && daemonAlive && anyProviderReady
+              allSystemsHealthy
                 ? "All systems running"
                 : !appAlive
                 ? "App server is not responding"
+                : !multicaAlive
+                ? "Multica is not responding"
                 : !daemonAlive && !anyProviderReady
                 ? "Daemon is not responding; no agent providers available"
                 : !daemonAlive
@@ -239,7 +308,7 @@ export function StatusBar() {
           >
             <span
               className={`inline-block h-2 w-2 rounded-full ${
-                appAlive && daemonAlive && anyProviderReady
+                allSystemsHealthy
                   ? "bg-green-500"
                   : !appAlive
                   ? "bg-red-500 animate-pulse"
@@ -247,16 +316,18 @@ export function StatusBar() {
               }`}
             />
             <span>
-              {appAlive && daemonAlive && anyProviderReady
+              {allSystemsHealthy
                 ? "在线"
                 : !appAlive
                 ? "离线"
+                : !multicaAlive
+                ? "Multica 离线"
                 : "Degraded"}
             </span>
           </button>
           {showServerPopup && (
             <div className={`absolute bottom-full left-0 mb-2 z-50 w-80 rounded-lg border bg-background p-3 shadow-lg ${
-              appAlive && daemonAlive && anyProviderReady
+              allSystemsHealthy
                 ? "border-green-500/30"
                 : !appAlive
                 ? "border-red-500/30"
@@ -265,13 +336,13 @@ export function StatusBar() {
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 space-y-2.5">
                   <p className={`text-xs font-medium ${
-                    appAlive && daemonAlive && anyProviderReady
+                    allSystemsHealthy
                       ? "text-green-500"
                       : !appAlive
                       ? "text-red-500"
                       : "text-amber-500"
                   }`}>
-                    {appAlive && daemonAlive && anyProviderReady
+                    {allSystemsHealthy
                       ? "All Systems Running"
                       : "Service Disruption"}
                   </p>
@@ -304,6 +375,20 @@ export function StatusBar() {
                     </p>
                   </div>
 
+                  {/* Multica */}
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className={`inline-block h-1.5 w-1.5 rounded-full shrink-0 ${multicaAlive ? "bg-green-500" : "bg-red-500"}`} />
+                      <span className="font-medium text-foreground/80">Multica</span>
+                      <span className={`ml-auto ${multicaAlive ? "text-green-500" : "text-red-500"}`}>{multicaAlive ? "Running" : "Down"}</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground/70 pl-3.5">
+                      {multicaAlive
+                        ? "Task sync, issue views, and agent assignment through Multica are working."
+                        : "Task sync, issue views, and agent assignment through Multica are unavailable."}
+                    </p>
+                  </div>
+
                   {/* Agent Providers */}
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 text-[11px]">
@@ -333,7 +418,7 @@ export function StatusBar() {
                   </div>
 
                   {/* Troubleshooting tips */}
-                  {(!appAlive || !daemonAlive || !anyProviderReady) && (
+                  {(!appAlive || !daemonAlive || !multicaAlive || !anyProviderReady) && (
                     <div className="pt-1.5 border-t border-border space-y-1">
                       <p className="text-[10px] font-medium text-foreground/70">How to fix</p>
                       {(!appAlive || !daemonAlive) && (
@@ -377,6 +462,11 @@ export function StatusBar() {
                           </p>
                         )
                       )}
+                      {appAlive && daemonAlive && !multicaAlive && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Multica is not responding. Check that the Multica server or API proxy is running and retry after it recovers.
+                        </p>
+                      )}
                       {appAlive && daemonAlive && !anyProviderReady && (
                         <p className="text-[10px] text-muted-foreground">
                           No agent providers are installed or logged in.{" "}
@@ -392,7 +482,7 @@ export function StatusBar() {
                   )}
 
                   {/* All good state */}
-                  {appAlive && daemonAlive && anyProviderReady && (
+                  {allSystemsHealthy && (
                     <p className="text-[10px] text-muted-foreground/60 pt-1 border-t border-border">
                       Cabinet is fully operational. All features are available.
                     </p>
@@ -409,6 +499,27 @@ export function StatusBar() {
             </div>
           )}
         </div>
+        {/* Running tasks indicator */}
+        {runningTasks.length > 0 && (
+          <button
+            onClick={() => {
+              const first = runningTasks[0];
+              if (first) setSection({ type: "issue-detail", id: first.issueId });
+            }}
+            className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-blue-400 hover:bg-muted transition-colors animate-pulse"
+            title={runningTasks.map((t) => `${t.identifier} ${t.title}`).join("\n")}
+          >
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span>
+              {runningTasks.length === 1
+                ? `${runningTasks[0].identifier} 运行中`
+                : `${runningTasks.length} 个任务运行中`}
+            </span>
+            {runningTasks.length === 1 && runningTasks[0].agentName && (
+              <span className="text-muted-foreground">· {runningTasks[0].agentName}</span>
+            )}
+          </button>
+        )}
         {currentPath && (
           <span>
             {saveStatus === "saving"

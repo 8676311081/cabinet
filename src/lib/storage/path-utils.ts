@@ -1,3 +1,4 @@
+import fs from "fs";
 import path from "path";
 import { getManagedDataDir, isElectronRuntime, PROJECT_ROOT } from "@/lib/runtime/runtime-config";
 
@@ -12,11 +13,53 @@ export const BACKUP_ROOT = isElectronRuntime()
   ? path.join(path.dirname(DATA_DIR), "cabinet-backups")
   : path.resolve(PROJECT_ROOT, "..", ".cabinet-backups", path.basename(PROJECT_ROOT));
 
+function isWithinDirectory(baseDir: string, candidatePath: string): boolean {
+  const relative = path.relative(baseDir, candidatePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function resolveNearestRealPath(targetPath: string): string {
+  let currentPath = targetPath;
+  const missingSegments: string[] = [];
+
+  while (true) {
+    try {
+      const realPath = fs.realpathSync(currentPath);
+      return path.resolve(realPath, ...missingSegments.reverse());
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+
+      const parentPath = path.dirname(currentPath);
+      if (parentPath === currentPath) {
+        return targetPath;
+      }
+
+      missingSegments.push(path.basename(currentPath));
+      currentPath = parentPath;
+    }
+  }
+}
+
 export function resolveContentPath(virtualPath: string): string {
   const resolved = path.resolve(DATA_DIR, virtualPath);
-  if (!resolved.startsWith(DATA_DIR)) {
+  if (!isWithinDirectory(DATA_DIR, resolved)) {
     throw new Error("Path traversal detected");
   }
+
+  try {
+    const realDataDir = fs.realpathSync(DATA_DIR);
+    const realResolved = resolveNearestRealPath(resolved);
+    if (!isWithinDirectory(realDataDir, realResolved)) {
+      throw new Error("Path traversal detected");
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
   return resolved;
 }
 

@@ -22,6 +22,9 @@ export interface IntegrationConfig {
       enabled: boolean;
       bot_token: string;
       chat_id: string;
+      bidirectional?: boolean;
+      default_agent_id?: string;
+      proxy?: string;
     };
     slack_webhook: {
       enabled: boolean;

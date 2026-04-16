@@ -47,6 +47,11 @@ import {
   stopMulticaPoller,
   reloadMulticaPoller,
 } from "./multica-poller";
+import {
+  startTelegramBot,
+  stopTelegramBot,
+  reloadTelegramBot,
+} from "./telegram-bot";
 
 const PORT = getDaemonPort();
 const AGENTS_DIR = path.join(DATA_DIR, ".agents");
@@ -85,6 +90,7 @@ interface PtySession {
   providerId: string;
   pty: pty.IPty;
   ws: WebSocket | null;
+  detachedAt?: number;
   createdAt: Date;
   output: string[];
   outputBytes: number;
@@ -290,6 +296,7 @@ setInterval(() => {
 // Cleanup detached sessions that have exited and been idle for 10 minutes
 setInterval(() => {
   const cutoff = Date.now() - 10 * 60 * 1000;
+  const detachedPtyCutoff = Date.now() - 30 * 60 * 1000;
   for (const [id, session] of sessions) {
     if (session.exited && !session.ws && session.createdAt.getTime() < cutoff) {
       const raw = session.output.join("");
@@ -297,6 +304,13 @@ setInterval(() => {
       setCompletedOutput(id, plain);
       sessions.delete(id);
       console.log(`Cleaned up exited detached session ${id}`);
+      continue;
+    }
+    if (!session.exited && !session.ws && session.detachedAt && session.detachedAt < detachedPtyCutoff) {
+      console.log(`Killing idle detached session ${id} after 30 minutes`);
+      try {
+        session.pty.kill();
+      } catch {}
     }
   }
 }, 60 * 1000);
@@ -312,6 +326,7 @@ function handlePtyConnection(ws: WebSocket, req: http.IncomingMessage): void {
   if (existing) {
     console.log(`Session ${sessionId} reconnected (exited=${existing.exited})`);
     existing.ws = ws;
+    delete existing.detachedAt;
 
     // Replay all buffered output so the client sees the full history
     const replay = existing.output.join("");
@@ -349,6 +364,7 @@ function handlePtyConnection(ws: WebSocket, req: http.IncomingMessage): void {
     ws.on("close", () => {
       console.log(`Session ${sessionId} detached (WebSocket closed, PTY kept alive)`);
       existing.ws = null;
+      existing.detachedAt = Date.now();
     });
 
     return;
@@ -397,6 +413,7 @@ function handlePtyConnection(ws: WebSocket, req: http.IncomingMessage): void {
   ws.on("close", () => {
     console.log(`Session ${sessionId} detached (WebSocket closed, PTY kept alive)`);
     session.ws = null;
+    session.detachedAt = Date.now();
   });
 
 }
@@ -896,7 +913,11 @@ const server = http.createServer(async (req, res) => {
         };
         const sessionId = id || `session-${Date.now()}`;
 
-        if (sessions.has(sessionId)) {
+        const existingSession = sessions.get(sessionId);
+        if (existingSession?.exited) {
+          sessions.delete(sessionId);
+          completedOutput.delete(sessionId);
+        } else if (existingSession) {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ sessionId, existing: true }));
           return;
@@ -1053,11 +1074,14 @@ wssEvents.on("connection", (ws) => {
 
 // ===== Startup =====
 
+const INTEGRATIONS_FILE = path.join(DATA_DIR, ".agents", ".config", "integrations.json");
+
 const scheduleWatcher = chokidar.watch(
   [
     path.join(AGENTS_DIR, "*/persona.md"),
     path.join(AGENTS_DIR, "*/jobs/*.yaml"),
     HEALTH_SCHEDULES_FILE,
+    INTEGRATIONS_FILE,
   ],
   {
     ignoreInitial: true,
@@ -1069,6 +1093,10 @@ scheduleWatcher.on("all", (event, filePath) => {
   // Reload Multica poller when any persona.md changes
   if (filePath && filePath.endsWith("persona.md")) {
     reloadMulticaPoller();
+  }
+  // Reload Telegram bot when integrations.json changes
+  if (filePath && filePath.endsWith("integrations.json")) {
+    void reloadTelegramBot();
   }
 });
 
@@ -1087,11 +1115,18 @@ server.listen(PORT, () => {
 
   // Start Multica task poller (no-op if MULTICA_PAT is not set)
   startMulticaPoller();
+
+  // Start Telegram bot (no-op if not configured)
+  void startTelegramBot();
 });
 
 // ===== Graceful Shutdown =====
 
-process.on("SIGINT", () => {
+let shuttingDown = false;
+
+function shutdown(): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
   console.log("\nShutting down...");
   for (const [, task] of scheduledJobs) {
     task.stop();
@@ -1106,11 +1141,15 @@ process.on("SIGINT", () => {
     try { session.pty.kill(); } catch {}
   }
   stopMulticaPoller();
+  stopTelegramBot();
   void scheduleWatcher.close();
   closeDb();
   server.close();
   process.exit(0);
-});
+}
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 wssPty.on("error", (err) => {
   console.error("PTY WebSocket error:", err.message);

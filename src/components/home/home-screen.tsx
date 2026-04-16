@@ -222,7 +222,28 @@ export function HomeScreen() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
   const agentMenuRef = useRef<HTMLDivElement>(null);
+  const refreshAgents = useCallback(() => {
+    const headers = getMulticaAuthHeaders();
+    const wsId = typeof window !== "undefined" ? localStorage.getItem("multica_workspace_id") : null;
+    const params = new URLSearchParams();
+    if (wsId) params.set("workspace_id", wsId);
+    const qs = params.toString() ? `?${params}` : "";
+
+    fetch(`/multica-api/agents${qs}`, { headers, cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: MulticaAgent[]) => {
+        const active = Array.isArray(data)
+          ? data.filter((a) => !a.archived_at)
+          : [];
+        setAgents(active);
+        if (active.length > 0) {
+          setSelectedAgentId((prev) => prev ?? active[0].id);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch("/api/agents/config")
@@ -237,24 +258,24 @@ export function HomeScreen() {
 
   // Load Multica agents for task assignment
   useEffect(() => {
-    const headers = getMulticaAuthHeaders();
-    const wsId = typeof window !== "undefined" ? localStorage.getItem("multica_workspace_id") : null;
-    const params = new URLSearchParams();
-    if (wsId) params.set("workspace_id", wsId);
-    const qs = params.toString() ? `?${params}` : "";
-    fetch(`/multica-api/agents${qs}`, { headers })
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: MulticaAgent[]) => {
-        const active = Array.isArray(data)
-          ? data.filter((a) => !a.archived_at)
-          : [];
-        setAgents(active);
-        if (active.length > 0) {
-          setSelectedAgentId((prev) => prev ?? active[0].id);
-        }
-      })
-      .catch(() => {});
-  }, []);
+    refreshAgents();
+
+    const handleFocus = () => {
+      refreshAgents();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshAgents();
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [refreshAgents]);
 
   // Close agent menu on outside click
   useEffect(() => {
@@ -278,15 +299,18 @@ export function HomeScreen() {
         mentionedPaths: [],
       }),
     });
-    if (res.ok) {
-      const data = await res.json();
-      setPrompt("");
-      setSection({
-        type: "agent",
-        slug: "general",
-        conversationId: data.conversation?.id,
-      });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      setError(`发起对话失败 (${res.status})${body ? `: ${body.slice(0, 100)}` : ""}`);
+      return;
     }
+    const data = await res.json();
+    setPrompt("");
+    setSection({
+      type: "agent",
+      slug: "general",
+      conversationId: data.conversation?.id,
+    });
   }, [setSection]);
 
   const submitTask = useCallback(async (text: string) => {
@@ -328,7 +352,8 @@ export function HomeScreen() {
   }, [selectedAgentId, setSection]);
 
   const submitPrompt = async (text: string) => {
-    if (!text.trim() || submitting) return;
+    if (!text.trim() || submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -340,6 +365,7 @@ export function HomeScreen() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "操作失败，请重试");
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };

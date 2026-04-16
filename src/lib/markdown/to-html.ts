@@ -5,17 +5,95 @@ import remarkRehype from "remark-rehype";
 import rehypeStringify from "rehype-stringify";
 
 /**
- * Pre-process markdown to convert [[Wiki Links]] to HTML anchors
- * before the remark pipeline (which doesn't understand wiki-link syntax).
+ * Convert [[Wiki Links]] into safe anchor nodes after markdown parsing.
  */
-function convertWikiLinks(markdown: string): string {
-  return markdown.replace(/\[\[([^\]]+)\]\]/g, (_match, pageName: string) => {
-    const slug = pageName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
-    return `<a data-wiki-link="true" data-page-name="${pageName}" href="#page:${slug}" class="wiki-link">${pageName}</a>`;
-  });
+type HastNode = {
+  type: string;
+  value?: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+};
+
+const WIKI_LINK_PATTERN = /\[\[([^\]]+)\]\]/g;
+const SKIP_WIKI_LINK_TAGS = new Set(["a", "code", "pre", "script", "style"]);
+
+function slugifyWikiPageName(pageName: string): string {
+  return pageName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function createWikiLinkNode(pageName: string): HastNode {
+  return {
+    type: "element",
+    tagName: "a",
+    properties: {
+      "data-wiki-link": "true",
+      "data-page-name": pageName,
+      href: `#page:${slugifyWikiPageName(pageName)}`,
+      className: ["wiki-link"],
+    },
+    children: [{ type: "text", value: pageName }],
+  };
+}
+
+function splitWikiLinksFromText(value: string): HastNode[] {
+  const nodes: HastNode[] = [];
+  let lastIndex = 0;
+
+  for (const match of value.matchAll(WIKI_LINK_PATTERN)) {
+    const pageName = match[1];
+    const matchIndex = match.index ?? 0;
+
+    if (matchIndex > lastIndex) {
+      nodes.push({ type: "text", value: value.slice(lastIndex, matchIndex) });
+    }
+
+    nodes.push(createWikiLinkNode(pageName));
+    lastIndex = matchIndex + match[0].length;
+  }
+
+  if (nodes.length === 0) {
+    return [{ type: "text", value }];
+  }
+
+  if (lastIndex < value.length) {
+    nodes.push({ type: "text", value: value.slice(lastIndex) });
+  }
+
+  return nodes;
+}
+
+function rewriteWikiLinks(node: HastNode): void {
+  if (!node.children || node.children.length === 0) {
+    return;
+  }
+
+  const nextChildren: HastNode[] = [];
+  for (const child of node.children) {
+    if (child.type === "element" && child.tagName && SKIP_WIKI_LINK_TAGS.has(child.tagName)) {
+      nextChildren.push(child);
+      continue;
+    }
+
+    if (child.type === "text" && typeof child.value === "string") {
+      nextChildren.push(...splitWikiLinksFromText(child.value));
+      continue;
+    }
+
+    rewriteWikiLinks(child);
+    nextChildren.push(child);
+  }
+
+  node.children = nextChildren;
+}
+
+function rehypeWikiLinks() {
+  return (tree: HastNode) => {
+    rewriteWikiLinks(tree);
+  };
 }
 
 /**
@@ -76,15 +154,15 @@ function resolveRelativeUrls(html: string, pagePath: string): string {
 }
 
 export async function markdownToHtml(markdown: string, pagePath?: string): Promise<string> {
-  // Pre-process wiki-links before remark (which would treat [[ as text)
-  const preprocessed = convertWikiLinks(markdown);
-
   const result = await unified()
     .use(remarkParse)
     .use(remarkGfm)
+    // TODO(security): install rehype-sanitize and replace this trusted-local fallback
+    // with an explicit allowlist for embedded media tags such as video and iframe.
     .use(remarkRehype, { allowDangerousHtml: true })
+    .use(rehypeWikiLinks)
     .use(rehypeStringify, { allowDangerousHtml: true })
-    .process(preprocessed);
+    .process(markdown);
 
   let html = String(result);
 
