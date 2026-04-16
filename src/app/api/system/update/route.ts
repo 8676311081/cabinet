@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   // 自动更新已禁用（本地定制版本）
   return NextResponse.json({
-    current: { version: "0.2.12" },
+    current: { version: "0.4.1" },
     latest: null,
     updateAvailable: false,
     canApplyUpdate: false,

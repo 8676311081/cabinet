@@ -18,7 +18,7 @@ export function MulticaProvider({ children }: MulticaProviderProps) {
   const wsUrl =
     (typeof window !== "undefined" && (window as Record<string, any>).CabinetDesktop?.multicaWsUrl) ||
     process.env.NEXT_PUBLIC_MULTICA_WS_URL ||
-    "ws://localhost:8080/ws";
+    "ws://localhost:18080/ws";
 
   const onLogin = useCallback(() => {
     document.cookie = "multica-authed=1; path=/; max-age=2592000; SameSite=Lax";

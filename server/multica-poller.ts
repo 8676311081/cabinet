@@ -18,7 +18,7 @@ import { getOrCreateDaemonToken } from "../src/lib/agents/daemon-auth";
 // Config
 // ---------------------------------------------------------------------------
 
-const MULTICA_API_URL = (process.env.MULTICA_API_URL || "http://localhost:8080").replace(/\/+$/, "");
+const MULTICA_API_URL = (process.env.MULTICA_API_URL || "http://localhost:18080").replace(/\/+$/, "");
 const POLL_INTERVAL_MS = 30_000;     // 30s between task polls per agent
 const TASK_TIMEOUT_MS = 30 * 60_000; // 30 min max execution per task
 const WAIT_POLL_MS = 3_000;          // 3s between session-output polls

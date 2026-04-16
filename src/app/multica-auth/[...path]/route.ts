@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 function multicaBaseUrl(): string {
-  return (process.env.MULTICA_API_URL || "http://localhost:8080").replace(/\/+$/, "");
+  return (process.env.MULTICA_API_URL || "http://localhost:18080").replace(/\/+$/, "");
 }
 
 function isLocalhostUrl(urlValue: string): boolean {

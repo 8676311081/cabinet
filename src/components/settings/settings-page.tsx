@@ -1160,62 +1160,69 @@ export function SettingsPage() {
           {tab === "about" && (
             <div className="space-y-6">
               <div>
-                <h3 className="text-[14px] font-semibold mb-1">Cabinet</h3>
+                <h3 className="text-[14px] font-semibold mb-1">Cabinet AI Agent 工作站</h3>
                 <p className="text-[12px] text-muted-foreground">
-                  AI-first self-hosted knowledge base and startup OS.
+                  知识库 + 任务管理 + 多 Agent 调度 + Telegram Bot
                 </p>
               </div>
 
               <div className="space-y-3 text-[13px]">
                 <div className="flex items-center justify-between py-2 border-b border-border">
                   <span className="text-muted-foreground">版本</span>
-                  <span className="font-mono">0.2.6</span>
+                  <span className="font-mono">0.4.1</span>
                 </div>
                 <div className="flex items-center justify-between py-2 border-b border-border">
                   <span className="text-muted-foreground">框架</span>
-                  <span>Next.js (App Router)</span>
+                  <span>Next.js 16 + Electron + Go</span>
                 </div>
                 <div className="flex items-center justify-between py-2 border-b border-border">
-                  <span className="text-muted-foreground">Storage</span>
-                  <span className="font-mono text-[12px] truncate max-w-[300px]" title={dataDir}>{dataDir || "Local filesystem"}</span>
+                  <span className="text-muted-foreground">数据目录</span>
+                  <span className="font-mono text-[12px] truncate max-w-[300px]" title={dataDir}>{dataDir || "本地文件系统"}</span>
                 </div>
                 <div className="flex items-center justify-between py-2 border-b border-border">
-                  <span className="text-muted-foreground">AI</span>
+                  <span className="text-muted-foreground">AI 引擎</span>
                   <span className="flex items-center gap-1.5">
                     <Sparkles className="h-3.5 w-3.5" />
-                    Powered by local AI CLIs
+                    Claude Code + Codex CLI
                   </span>
+                </div>
+                <div className="flex items-center justify-between py-2 border-b border-border">
+                  <span className="text-muted-foreground">任务管理</span>
+                  <span>Multica（内嵌）</span>
                 </div>
               </div>
 
-              <div className="pt-2">
-                <p className="text-[12px] text-muted-foreground">
-                  All content lives as markdown files on disk. Humans define intent. Agents do the work. The knowledge base is the shared memory between both.
+              <div className="pt-2 space-y-2">
+                <h4 className="text-[12px] font-medium">功能特性</h4>
+                <ul className="text-[12px] text-muted-foreground space-y-1 list-disc list-inside">
+                  <li>Markdown 知识库 + WYSIWYG 编辑器</li>
+                  <li>AI Agent 面板（Claude / Codex 本地执行）</li>
+                  <li>Multica 任务管理（Issue / Project / Agent 调度）</li>
+                  <li>Telegram Bot 双向控制（创建任务、运行、进度推送）</li>
+                  <li>多 Agent Daemon（自动认领、PTY 执行、状态回报）</li>
+                  <li>Cabinet 首页任务创建 → Multica 自动派发</li>
+                  <li>14 模块中文汉化</li>
+                  <li>20 轮对抗安全审查（Claude + Codex 协作）</li>
+                </ul>
+              </div>
+
+              <div className="border-t border-border pt-4">
+                <p className="text-[11px] text-muted-foreground">
+                  基于 hilash/cabinet + multica-ai/multica，由 Claude Opus 4.6 和 Codex GPT-5.4 协作开发。
                 </p>
               </div>
 
-              <div className="border-t border-border pt-6">
-                <h3 className="text-[14px] font-semibold mb-1">联系我们</h3>
-                <p className="text-[12px] text-muted-foreground mb-3">
-                  Get help, share feedback, or just say hi.
-                </p>
+              <div className="border-t border-border pt-4">
+                <h3 className="text-[13px] font-semibold mb-2">项目链接</h3>
                 <div className="space-y-2">
                   <a
-                    href="https://discord.gg/hJa5TRTbTH"
+                    href="https://github.com/8676311081/cabinet-ai"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-[13px] font-medium hover:bg-primary/10 transition-colors"
+                    className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 text-[13px] hover:bg-accent transition-colors"
                   >
-                    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
-                    加入 Discord
-                    <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary">推荐</span>
-                  </a>
-                  <a
-                    href="mailto:hi@runcabinet.com"
-                    className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 text-[13px] text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors"
-                  >
-                    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
-                    hi@runcabinet.com
+                    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a12 12 0 0 0-3.8 23.38c.6.11.82-.26.82-.58v-2.24c-3.34.73-4.04-1.42-4.04-1.42-.55-1.37-1.33-1.73-1.33-1.73-1.08-.74.08-.72.08-.72 1.2.08 1.83 1.22 1.83 1.22 1.06 1.8 2.8 1.28 3.48.98.11-.77.42-1.28.76-1.58-2.67-.3-5.47-1.32-5.47-5.86 0-1.3.47-2.36 1.23-3.2-.12-.3-.53-1.52.12-3.16 0 0 1-.32 3.3 1.22a11.67 11.67 0 0 1 6.02 0c2.3-1.54 3.3-1.22 3.3-1.22.65 1.64.24 2.86.12 3.16.77.84 1.23 1.9 1.23 3.2 0 4.55-2.8 5.56-5.48 5.86.43.37.81 1.08.81 2.19v3.25c0 .32.22.7.83.58A12 12 0 0 0 12 .5Z"/></svg>
+                    GitHub · cabinet-ai
                   </a>
                 </div>
               </div>
