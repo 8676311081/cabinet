@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "child_process";
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
 
 // Test the output truncation constant and behavior pattern
 // We can't import runCommand directly (it's not exported), so we test the
@@ -24,6 +27,40 @@ test("health pipeline runHealthPipeline accepts reportIdOverride", async () => {
     reportIdOverride: "test-override-123",
   };
   assert.equal(input.reportIdOverride, "test-override-123");
+});
+
+test("resolveHealthBuildWorkspaceRoot returns source repo root", async () => {
+  const mod = await import("./health-pipeline");
+  const result = mod.resolveHealthBuildWorkspaceRoot({
+    projectRoot: process.cwd(),
+    pwd: process.cwd(),
+  });
+
+  assert.equal(result.cwd, process.cwd());
+});
+
+test("resolveHealthBuildWorkspaceRoot falls back from standalone cwd to source root next to data dir", async () => {
+  const mod = await import("./health-pipeline");
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cabinet-health-"));
+  const repoRoot = path.join(tempRoot, "repo");
+  const standaloneRoot = path.join(tempRoot, "standalone");
+  const dataDir = path.join(repoRoot, "data");
+
+  await fs.mkdir(path.join(repoRoot, "src", "app"), { recursive: true });
+  await fs.mkdir(standaloneRoot, { recursive: true });
+  await fs.mkdir(dataDir, { recursive: true });
+  await fs.writeFile(path.join(repoRoot, "package.json"), "{}\n", "utf8");
+  await fs.writeFile(path.join(repoRoot, "next.config.ts"), "export default {};\n", "utf8");
+
+  const result = mod.resolveHealthBuildWorkspaceRoot({
+    projectRoot: standaloneRoot,
+    pwd: "",
+    dataDir,
+  });
+
+  assert.equal(result.cwd, repoRoot);
+
+  await fs.rm(tempRoot, { recursive: true, force: true });
 });
 
 // Integration-style test: verify spawn + timeout pattern works

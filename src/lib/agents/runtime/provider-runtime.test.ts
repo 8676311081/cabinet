@@ -3,17 +3,17 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AgentProvider } from "./provider-interface";
-import { providerRegistry } from "./provider-registry";
-import { writeProviderSettings } from "./provider-settings";
+import type { AgentProvider } from "@/lib/agents/provider/provider-interface";
+import { providerRegistry } from "@/lib/agents/provider/provider-registry";
+import { writeProviderSettings } from "@/lib/agents/provider/provider-settings";
 import {
   getOneShotLaunchSpec,
   getSessionLaunchSpec,
   resolveProviderId,
   runOneShotProviderPrompt,
 } from "./provider-runtime";
-import { claudeCodeProvider } from "./providers/claude-code";
-import { codexCliProvider } from "./providers/codex-cli";
+import { claudeCodeProvider } from "@/lib/agents/provider/providers/claude-code";
+import { codexCliProvider } from "@/lib/agents/provider/providers/codex-cli";
 
 async function createExecutableScript(source: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cabinet-provider-test-"));

@@ -1,0 +1,53 @@
+export interface ProviderStatus {
+  available: boolean;
+  authenticated: boolean;
+  version?: string;
+  error?: string;
+}
+
+export interface CliProviderInvocation {
+  command: string;
+  args: string[];
+  initialPrompt?: string;
+  readyStrategy?: "claude";
+}
+
+export interface AgentProvider {
+  id: string;
+  name: string;
+  type: "cli" | "api";
+  icon: string;
+  installMessage?: string;
+  installSteps?: Array<{ title: string; detail: string; link?: { label: string; url: string } }>;
+
+  // CLI providers
+  command?: string;
+  commandCandidates?: string[];
+  buildArgs?(prompt: string, workdir: string): string[];
+  buildOneShotInvocation?(prompt: string, workdir: string): CliProviderInvocation;
+  buildSessionInvocation?(prompt: string | undefined, workdir: string): CliProviderInvocation;
+
+  // API providers
+  apiKeyEnvVar?: string;
+  runPrompt?(prompt: string, context: string): Promise<string>;
+
+  // Optional: post-process one-shot stdout. Used when the provider is
+  // invoked with a structured output format (e.g. stream-json) and the
+  // caller expects plain assistant text.
+  parseOneShotStdout?(stdout: string): string;
+
+  // Common
+  isAvailable(): Promise<boolean>;
+  healthCheck(): Promise<ProviderStatus>;
+}
+
+export interface ProviderRegistry {
+  providers: Map<string, AgentProvider>;
+  defaultProvider: string;
+
+  register(provider: AgentProvider): void;
+  get(id: string): AgentProvider | undefined;
+  getDefault(): AgentProvider | undefined;
+  listAll(): AgentProvider[];
+  listAvailable(): Promise<AgentProvider[]>;
+}

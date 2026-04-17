@@ -20,6 +20,7 @@ import yaml from "js-yaml";
 import chokidar from "chokidar";
 import matter from "gray-matter";
 import { getDb, closeDb } from "./db";
+import type { ServiceContext, ServiceModule } from "./service-module";
 import { DATA_DIR } from "../src/lib/storage/path-utils";
 import {
   getAppOrigin,
@@ -43,16 +44,10 @@ import {
   normalizeJobConfig,
   normalizeJobId,
 } from "../src/lib/jobs/job-normalization";
-import {
-  startMulticaPoller,
-  stopMulticaPoller,
-  reloadMulticaPoller,
-} from "./multica-poller";
-import {
-  startTelegramBot,
-  stopTelegramBot,
-  reloadTelegramBot,
-} from "./telegram-bot";
+import { superviseService } from "./service-supervisor";
+import { createTerminalServerModule } from "./services/terminal-server.module";
+import { createMulticaPollerModule } from "./services/multica-poller.module";
+import { createTelegramModule } from "./services/telegram.module";
 
 const PORT = getDaemonPort();
 const AGENTS_DIR = path.join(DATA_DIR, ".agents");
@@ -69,7 +64,7 @@ const ALLOWED_BROWSER_ORIGINS = new Set(
 // ----- Database Initialization -----
 
 console.log("Initializing Cabinet database...");
-getDb();
+const db = getDb();
 console.log("Database ready.");
 
 const nvmBin = getNvmNodeBin();
@@ -996,6 +991,10 @@ const server = http.createServer(async (req, res) => {
         scheduledHeartbeats: scheduledHeartbeats.size,
         scheduledHealthChecks: scheduledHealthChecks.size,
         subscribers: subscribers.length,
+        services: serviceModules.map((module) => ({
+          name: module.name,
+          ...module.health(),
+        })),
       })
     );
     return;
@@ -1076,6 +1075,64 @@ wssEvents.on("connection", (ws) => {
 // ===== Startup =====
 
 const INTEGRATIONS_FILE = path.join(DATA_DIR, ".agents", ".config", "integrations.json");
+const serviceAbortController = new AbortController();
+let serviceModules: ServiceModule[] = [];
+
+function formatDaemonError(err: unknown): string {
+  if (err instanceof Error) {
+    return err.stack || err.message;
+  }
+
+  return String(err);
+}
+
+function buildServiceContext(signal: AbortSignal, module: ServiceModule): ServiceContext {
+  return {
+    signal,
+    dataDir: DATA_DIR,
+    db,
+    log: (msg: string) => {
+      console.log(`[service:${module.name}] ${msg}`);
+    },
+  };
+}
+
+async function waitForServiceUp(module: ServiceModule, signal: AbortSignal): Promise<void> {
+  while (!signal.aborted && module.health().status !== "up") {
+    await new Promise<void>((resolve) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        cleanup();
+        resolve();
+      };
+      const cleanup = () => {
+        signal.removeEventListener("abort", onAbort);
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve();
+      }, 250);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+}
+
+async function reloadModules(filter: (module: ServiceModule) => boolean): Promise<void> {
+  const reloadTargets = serviceModules.filter(
+    (module): module is ServiceModule & Required<Pick<ServiceModule, "reload">> =>
+      filter(module) && typeof module.reload === "function",
+  );
+
+  await Promise.all(
+    reloadTargets.map(async (module) => {
+      try {
+        await module.reload();
+      } catch (err) {
+        console.error(`[supervisor:${module.name}] reload failed:`, formatDaemonError(err));
+      }
+    }),
+  );
+}
 
 const scheduleWatcher = chokidar.watch(
   [
@@ -1093,42 +1150,63 @@ scheduleWatcher.on("all", (event, filePath) => {
   queueScheduleReload();
   // Reload Multica poller when any persona.md changes
   if (filePath && filePath.endsWith("persona.md")) {
-    reloadMulticaPoller();
+    void reloadModules((module) => module.name === "multica-poller");
   }
   // Reload Telegram bot when integrations.json changes
   if (filePath && filePath.endsWith("integrations.json")) {
-    void reloadTelegramBot();
+    void reloadModules((module) => module.name === "telegram-bot");
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`Cabinet Daemon running on port ${PORT}`);
-  console.log(`  Terminal WebSocket: ws://localhost:${PORT}/api/daemon/pty`);
-  console.log(`  Events WebSocket: ws://localhost:${PORT}/api/daemon/events`);
-  console.log(`  Session API: http://localhost:${PORT}/sessions`);
-  console.log(`  Reload schedules: POST http://localhost:${PORT}/reload-schedules`);
-  console.log(`  Health check: http://localhost:${PORT}/health`);
-  console.log(`  Trigger endpoint: POST http://localhost:${PORT}/trigger`);
-  console.log(`  Default provider: ${resolveProviderId()}`);
-  console.log(`  Working directory: ${DATA_DIR}`);
+const terminalModule = createTerminalServerModule({
+  port: PORT,
+  server,
+  onStarted: () => {
+    console.log(`Cabinet Daemon running on port ${PORT}`);
+    console.log(`  Terminal WebSocket: ws://localhost:${PORT}/api/daemon/pty`);
+    console.log(`  Events WebSocket: ws://localhost:${PORT}/api/daemon/events`);
+    console.log(`  Session API: http://localhost:${PORT}/sessions`);
+    console.log(`  Reload schedules: POST http://localhost:${PORT}/reload-schedules`);
+    console.log(`  Health check: http://localhost:${PORT}/health`);
+    console.log(`  Trigger endpoint: POST http://localhost:${PORT}/trigger`);
+    console.log(`  Default provider: ${resolveProviderId()}`);
+    console.log(`  Working directory: ${DATA_DIR}`);
+    void reloadSchedules();
+  },
+});
+const multicaModule = createMulticaPollerModule({
+  waitUntilReady: (signal) => waitForServiceUp(terminalModule, signal),
+});
+const telegramModule = createTelegramModule({
+  waitUntilReady: (signal) => waitForServiceUp(terminalModule, signal),
+});
+serviceModules = [terminalModule, multicaModule, telegramModule];
 
-  void reloadSchedules();
-
-  // Start Multica task poller (no-op if MULTICA_PAT is not set)
-  startMulticaPoller();
-
-  // Start Telegram bot (no-op if not configured)
-  void startTelegramBot();
+void Promise.all(
+  serviceModules.map((module) =>
+    superviseService(
+      module.name,
+      async (signal) => {
+        await module.start(buildServiceContext(signal, module));
+      },
+      {
+        signal: serviceAbortController.signal,
+      },
+    ),
+  ),
+).catch((err) => {
+  console.error("[supervisor] fatal startup error:", formatDaemonError(err));
 });
 
 // ===== Graceful Shutdown =====
 
 let shuttingDown = false;
 
-function shutdown(): void {
+async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log("\nShutting down...");
+  serviceAbortController.abort();
   for (const [, task] of scheduledJobs) {
     task.stop();
   }
@@ -1141,16 +1219,25 @@ function shutdown(): void {
   for (const [, session] of sessions) {
     try { session.pty.kill(); } catch {}
   }
-  stopMulticaPoller();
-  stopTelegramBot();
-  void scheduleWatcher.close();
+  await Promise.all(serviceModules.map((module) => module.stop().catch(() => {})));
+  await scheduleWatcher.close().catch(() => {});
   closeDb();
-  server.close();
+  await new Promise<void>((resolve) => {
+    if (!server.listening) {
+      resolve();
+      return;
+    }
+    server.close(() => resolve());
+  });
   process.exit(0);
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.on("SIGINT", () => {
+  void shutdown();
+});
+process.on("SIGTERM", () => {
+  void shutdown();
+});
 
 wssPty.on("error", (err) => {
   console.error("PTY WebSocket error:", err.message);
