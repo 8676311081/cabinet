@@ -4,8 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const net = require("net");
 const { spawn } = require("child_process");
-const { app, BrowserWindow, dialog, autoUpdater } = require("electron");
-const { updateElectronApp } = require("update-electron-app");
+const { app, BrowserWindow, dialog } = require("electron");
 
 // Suppress EPIPE errors from broken pipes (e.g. after force-kill)
 process.stdout.on("error", (err) => { if (err.code === "EPIPE") process.exit(0); });
@@ -114,6 +113,26 @@ function writeMulticaPatToFile(token) {
   const patFile = multicaPatFilePath();
   fs.writeFileSync(patFile, JSON.stringify({ token }), "utf8");
   fs.chmodSync(patFile, 0o600);
+}
+
+// readInitialPatFile polls for a PAT written by the multica server to a
+// 0600 handoff file. The server writes the token after seeding; we read it
+// here instead of parsing stdout so the secret never crosses the inherited
+// stdio of agent children or OS log pipes.
+async function readInitialPatFile(patPath, timeoutMs = 5_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      if (fs.existsSync(patPath)) {
+        const token = fs.readFileSync(patPath, "utf8").trim();
+        if (token) return token;
+      }
+    } catch {
+      // keep polling
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return null;
 }
 
 async function waitForMulticaPat(timeoutMs = 8_000) {
@@ -283,25 +302,18 @@ async function startMulticaServer() {
   });
   backendChildren.push(child);
 
-  // Capture MULTICA_PAT from server stdout (printed by seedOwner on startup).
-  let capturedPAT = null;
+  // Forward server stdout to console. The PAT is handed off via a 0600 file
+  // written by the server (see writeSecret in multica main.go) rather than
+  // stdout, because stdout is inherited by agent children and can surface in
+  // OS logs.
   child.stdout.on("data", (chunk) => {
     const text = chunk.toString();
-    const match = text.match(/MULTICA_PAT=(\S+)/);
-    if (match) {
-      capturedPAT = match[1];
-      process.env.MULTICA_PAT = capturedPAT;
-      console.log(`[multica] PAT captured (${capturedPAT.length} chars)`);
-      // Save to userData for preload and backend children to read.
-      writeMulticaPatToFile(capturedPAT);
-    }
-    // Forward other output to console.
     for (const line of text.split("\n").filter(Boolean)) {
-      if (!line.startsWith("MULTICA_PAT=")) {
-        console.log(`[multica-server] ${line}`);
-      }
+      console.log(`[multica-server] ${line}`);
     }
   });
+
+  const patFilePath = path.join(multicaDbDir, "initial-pat");
 
   child.on("exit", (code, signal) => {
     console.log(`[multica] Server exited (code=${code}, signal=${signal})`);
@@ -318,10 +330,17 @@ async function startMulticaServer() {
       void healthErr;
     }
     console.log(`[multica] Server is ready on port ${multicaPort}`);
-    // Ensure backend children inherit MULTICA_PAT at spawn time.
-    const token = capturedPAT || await waitForMulticaPat(5_000);
-    if (!token) {
-      console.warn("[multica] MULTICA_PAT not available yet; daemon may start without PAT");
+    // Read the PAT from the on-disk handoff file (0600) rather than stdout.
+    const token = await readInitialPatFile(patFilePath, 5_000);
+    if (token) {
+      process.env.MULTICA_PAT = token;
+      writeMulticaPatToFile(token);
+      console.log(`[multica] PAT loaded from ${patFilePath} (${token.length} chars)`);
+    } else {
+      const fallback = await waitForMulticaPat(2_000);
+      if (!fallback) {
+        console.warn("[multica] MULTICA_PAT not available yet; daemon may start without PAT");
+      }
     }
     return multicaPort;
   } catch (err) {
@@ -407,88 +426,16 @@ async function startEmbeddedCabinet() {
 }
 
 function configureAutoUpdates() {
-  // 自动更新已禁用（本地定制版本）
-  return;
-
-  if (process.platform !== "darwin") {
-    return;
-  }
-
-  try {
-    updateElectronApp({
-      repo: "hilash/cabinet",
-      updateInterval: "4 hours",
-      notifyUser: false,
-    });
-  } catch (error) {
-    writeUpdateStatus({
-      state: "failed",
-      completedAt: new Date().toISOString(),
-      installKind: "electron-macos",
-      message: "Electron update setup failed.",
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  autoUpdater.on("checking-for-update", () => {
-    writeUpdateStatus({
-      state: "checking",
-      startedAt: new Date().toISOString(),
-      installKind: "electron-macos",
-      message: "Checking for a newer Cabinet desktop release...",
-    });
-  });
-
-  autoUpdater.on("update-available", () => {
-    writeUpdateStatus({
-      state: "available",
-      startedAt: new Date().toISOString(),
-      installKind: "electron-macos",
-      message: "A new Cabinet desktop release is downloading in the background.",
-    });
-  });
-
-  autoUpdater.on("update-not-available", () => {
-    writeUpdateStatus({
-      state: "idle",
-      completedAt: new Date().toISOString(),
-      installKind: "electron-macos",
-      message: "Cabinet desktop is up to date.",
-    });
-  });
-
-  autoUpdater.on("error", (error) => {
-    writeUpdateStatus({
-      state: "failed",
-      completedAt: new Date().toISOString(),
-      installKind: "electron-macos",
-      message: "Cabinet desktop update failed.",
-      error: error instanceof Error ? error.message : String(error),
-    });
-  });
-
-  autoUpdater.on("update-downloaded", async () => {
-    writeUpdateStatus({
-      state: "restart-required",
-      completedAt: new Date().toISOString(),
-      installKind: "electron-macos",
-      message: "Restart Cabinet to finish applying the desktop update.",
-    });
-
-    const prompt = await dialog.showMessageBox(mainWindow, {
-      type: "info",
-      buttons: ["Restart to update", "Later"],
-      defaultId: 0,
-      cancelId: 1,
-      title: "Cabinet update ready",
-      message: "A new Cabinet desktop release is ready.",
-      detail:
-        "Your desktop data stays outside the app bundle, but keeping a copy is still recommended while Cabinet is moving fast.",
-    });
-
-    if (prompt.response === 0) {
-      autoUpdater.quitAndInstall();
-    }
+  // Auto-update is intentionally disabled in this local build. The upstream
+  // feed at hilash/cabinet is not controlled by this deployment, so enabling
+  // auto-update would let that repo's releases replace this binary. Keep this
+  // function as a no-op; the previous implementation was dead code after an
+  // unconditional early return and has been removed.
+  writeUpdateStatus({
+    state: "disabled",
+    completedAt: new Date().toISOString(),
+    installKind: "electron-macos",
+    message: "Auto-update disabled in this build.",
   });
 }
 
