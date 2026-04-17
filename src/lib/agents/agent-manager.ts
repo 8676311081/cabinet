@@ -1,6 +1,5 @@
 import { spawn, type ChildProcess } from "child_process";
-import path from "path";
-import { DATA_DIR } from "@/lib/storage/path-utils";
+import { DATA_DIR, resolveContentPath } from "@/lib/storage/path-utils";
 import { getOneShotLaunchSpec } from "./provider-runtime";
 
 export interface AgentSession {
@@ -16,6 +15,19 @@ export interface AgentSession {
 
 // In-memory session store
 const sessions = new Map<string, AgentSession>();
+
+// Cap per-session captured output so a runaway/verbose agent can't OOM the
+// host process. Keeps the tail, which is what summaries and UIs actually show.
+const MAX_OUTPUT_BYTES = 1_000_000;
+
+function pushOutput(session: AgentSession, chunk: string): void {
+  if (session.output.length + chunk.length <= MAX_OUTPUT_BYTES) {
+    session.output += chunk;
+    return;
+  }
+  const combined = session.output + chunk;
+  session.output = combined.slice(combined.length - MAX_OUTPUT_BYTES);
+}
 
 export function getActiveSessions(): AgentSession[] {
   return Array.from(sessions.values())
@@ -79,7 +91,7 @@ export async function runAgent(
     output: "",
   };
 
-  const cwd = workdir ? path.join(DATA_DIR, workdir) : DATA_DIR;
+  const cwd = workdir ? resolveContentPath(workdir) : DATA_DIR;
   const launch = getOneShotLaunchSpec({
     providerId,
     prompt,
@@ -98,11 +110,11 @@ export async function runAgent(
   sessions.set(id, session);
 
   proc.stdout?.on("data", (data: Buffer) => {
-    session.output += data.toString();
+    pushOutput(session, data.toString());
   });
 
   proc.stderr?.on("data", (data: Buffer) => {
-    session.output += data.toString();
+    pushOutput(session, data.toString());
   });
 
   proc.on("close", (code: number | null) => {

@@ -5,6 +5,7 @@ import http from "http";
 import { execSync } from "child_process";
 import { DATA_DIR } from "../src/lib/storage/path-utils";
 import { getDaemonPort } from "../src/lib/runtime/runtime-config";
+import { buildAgentEnv } from "./env-sanitize";
 
 const PORT = getDaemonPort();
 
@@ -263,7 +264,7 @@ wss.on("connection", (ws, req) => {
       rows: 30,
       cwd: DATA_DIR,
       env: {
-        ...(process.env as Record<string, string>),
+        ...buildAgentEnv(),
         PATH: enrichedPath,
         TERM: "xterm-256color",
         COLORTERM: "truecolor",

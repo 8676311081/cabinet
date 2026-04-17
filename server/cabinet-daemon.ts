@@ -27,6 +27,7 @@ import {
 } from "../src/lib/runtime/runtime-config";
 import { getSessionLaunchSpec, resolveProviderId } from "../src/lib/agents/provider-runtime";
 import { getNvmNodeBin } from "../src/lib/agents/nvm-path";
+import { buildAgentEnv } from "./env-sanitize";
 import {
   appendConversationTranscript,
   finalizeConversation,
@@ -440,7 +441,7 @@ function createDetachedSession(input: {
     rows: 30,
     cwd,
     env: {
-      ...(process.env as Record<string, string>),
+      ...buildAgentEnv(),
       PATH: enrichedPath,
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
