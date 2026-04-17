@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { Send, Users, MessageSquare, ListTodo, ChevronDown, Bot } from "lucide-react";
+import { getStoredMulticaWorkspaceId, multicaFetch } from "@/lib/electron-desktop";
 import { cn } from "@/lib/utils";
 
 const QUICK_ACTIONS_TASK = [
@@ -191,27 +192,6 @@ interface MulticaAgent {
   archived_at?: string | null;
 }
 
-function getMulticaToken(): string | null {
-  if (typeof window === "undefined") return null;
-  // Try localStorage first (set by MulticaAuthGuard after login)
-  const stored = localStorage.getItem("multica_token");
-  if (stored) return stored;
-  // Fallback: Electron preload exposes the PAT directly
-  const desktop = (window as Record<string, any>).CabinetDesktop;
-  if (desktop?.multicaPAT) return desktop.multicaPAT;
-  // Fallback: env var (dev mode)
-  return process.env.NEXT_PUBLIC_MULTICA_PAT || null;
-}
-
-function getMulticaAuthHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const token = getMulticaToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const wsId = typeof window !== "undefined" ? localStorage.getItem("multica_workspace_id") : null;
-  if (wsId) headers["X-Workspace-ID"] = wsId;
-  return headers;
-}
-
 export function HomeScreen() {
   const setSection = useAppStore((s) => s.setSection);
   const [prompt, setPrompt] = useState("");
@@ -225,13 +205,12 @@ export function HomeScreen() {
   const submittingRef = useRef(false);
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const refreshAgents = useCallback(() => {
-    const headers = getMulticaAuthHeaders();
-    const wsId = typeof window !== "undefined" ? localStorage.getItem("multica_workspace_id") : null;
+    const wsId = getStoredMulticaWorkspaceId();
     const params = new URLSearchParams();
     if (wsId) params.set("workspace_id", wsId);
     const qs = params.toString() ? `?${params}` : "";
 
-    fetch(`/multica-api/agents${qs}`, { headers, cache: "no-store" })
+    multicaFetch(`/agents${qs}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : []))
       .then((data: MulticaAgent[]) => {
         const active = Array.isArray(data)
@@ -314,8 +293,7 @@ export function HomeScreen() {
   }, [setSection]);
 
   const submitTask = useCallback(async (text: string) => {
-    const headers = getMulticaAuthHeaders();
-    const wsId = typeof window !== "undefined" ? localStorage.getItem("multica_workspace_id") : null;
+    const wsId = getStoredMulticaWorkspaceId();
     const params = new URLSearchParams();
     if (wsId) params.set("workspace_id", wsId);
     const qs = params.toString() ? `?${params}` : "";
@@ -330,7 +308,14 @@ export function HomeScreen() {
       payload.assignee_id = selectedAgentId;
     }
 
-    const res = await fetch(`/multica-api/issues${qs}`, {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (wsId) {
+      headers["X-Workspace-ID"] = wsId;
+    }
+
+    const res = await multicaFetch(`/issues${qs}`, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),

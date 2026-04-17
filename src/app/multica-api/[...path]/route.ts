@@ -19,6 +19,10 @@ function copyHeaders(req: NextRequest): Headers {
   const headers = new Headers(req.headers);
   headers.delete("host");
   headers.delete("content-length");
+  const embeddedPat = process.env.MULTICA_PAT?.trim();
+  if (embeddedPat) {
+    headers.set("authorization", `Bearer ${embeddedPat}`);
+  }
   return headers;
 }
 

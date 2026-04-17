@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, type ReactNode } from "react";
+import { getCabinetDesktop, multicaStorage } from "@/lib/electron-desktop";
 
 const CoreProvider = dynamic(
   () => import("@multica/core/platform").then((m) => m.CoreProvider),
@@ -13,10 +14,11 @@ type MulticaProviderProps = {
 };
 
 export function MulticaProvider({ children }: MulticaProviderProps) {
+  const desktop = getCabinetDesktop();
   const apiBaseUrl =
     process.env.NEXT_PUBLIC_MULTICA_API_URL || "/multica-api";
   const wsUrl =
-    (typeof window !== "undefined" && (window as Record<string, any>).CabinetDesktop?.multicaWsUrl) ||
+    desktop?.multicaWsUrl ||
     process.env.NEXT_PUBLIC_MULTICA_WS_URL ||
     "ws://localhost:18080/ws";
 
@@ -32,6 +34,7 @@ export function MulticaProvider({ children }: MulticaProviderProps) {
     <CoreProvider
       apiBaseUrl={apiBaseUrl}
       wsUrl={wsUrl}
+      storage={multicaStorage}
       onLogin={onLogin}
       onLogout={onLogout}
     >

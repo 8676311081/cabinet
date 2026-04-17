@@ -6,6 +6,7 @@ import { useCabinetUpdate } from "@/hooks/use-cabinet-update";
 import { useEditorStore } from "@/stores/editor-store";
 import { useTreeStore } from "@/stores/tree-store";
 import { useAppStore } from "@/stores/app-store";
+import { getStoredMulticaWorkspaceId, multicaFetch } from "@/lib/electron-desktop";
 
 interface RunningTask {
   issueId: string;
@@ -124,20 +125,18 @@ export function StatusBar() {
     let mounted = true;
     const checkRunningTasks = async () => {
       try {
-        const token = typeof window !== "undefined" ? localStorage.getItem("multica_token") : null;
-        const wsId = typeof window !== "undefined" ? localStorage.getItem("multica_workspace_id") : null;
-        if (!token || !wsId) {
+        const wsId = getStoredMulticaWorkspaceId();
+        if (!wsId) {
           if (mounted) setRunningTasks([]);
           return;
         }
 
         const headers: Record<string, string> = {
-          "Authorization": `Bearer ${token}`,
           "X-Workspace-ID": wsId,
         };
 
         const params = new URLSearchParams({ workspace_id: wsId, open_only: "true" });
-        const res = await fetch(`/multica-api/issues?${params}`, { headers, cache: "no-store" });
+        const res = await multicaFetch(`/issues?${params}`, { headers, cache: "no-store" });
         if (!mounted) return;
         if (!res.ok) {
           setRunningTasks([]);
@@ -147,7 +146,7 @@ export function StatusBar() {
         const issues = Array.isArray(data) ? data : data?.issues || [];
 
         // Get agents for name lookup
-        const agentsRes = await fetch(`/multica-api/agents?workspace_id=${wsId}`, { headers, cache: "no-store" });
+        const agentsRes = await multicaFetch(`/agents?workspace_id=${wsId}`, { headers, cache: "no-store" });
         const agents: Array<{ id: string; name: string }> = agentsRes.ok ? await agentsRes.json() : [];
         const agentMap = new Map(agents.map((a) => [a.id, a.name]));
 

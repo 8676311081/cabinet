@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { execFileSync } = require("child_process");
+const { createServer } = require("http");
 const fs = require("fs");
 const path = require("path");
 const net = require("net");
 const { spawn } = require("child_process");
-const { app, BrowserWindow, dialog } = require("electron");
+const { WebSocketServer, WebSocket } = require("ws");
+const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 
 // Suppress EPIPE errors from broken pipes (e.g. after force-kill)
 process.stdout.on("error", (err) => { if (err.code === "EPIPE") process.exit(0); });
@@ -39,6 +41,9 @@ const updateStatusPath = path.join(managedDataDir, ".cabinet", "update-status.js
 let mainWindow = null;
 let backendChildren = [];
 let closingFromBackendFailure = false;
+let multicaWsProxyHttpServer = null;
+let multicaWsProxyServer = null;
+let multicaWsProxyUrl = null;
 
 function writeUpdateStatus(status) {
   fs.mkdirSync(path.dirname(updateStatusPath), { recursive: true });
@@ -146,6 +151,204 @@ async function waitForMulticaPat(timeoutMs = 8_000) {
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   return null;
+}
+
+function isLocalhostUrl(urlValue) {
+  try {
+    const url = new URL(urlValue);
+    return url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
+function normalizeMulticaPath(pathValue) {
+  const url = new URL(pathValue || "/", "http://127.0.0.1");
+  const rawPathname = url.pathname.replace(/^\/+/, "");
+  const strippedPathname =
+    rawPathname === "multica-api"
+      ? ""
+      : rawPathname.startsWith("multica-api/")
+        ? rawPathname.slice("multica-api/".length)
+        : rawPathname === "multica-auth"
+          ? "auth"
+          : rawPathname.startsWith("multica-auth/")
+            ? `auth/${rawPathname.slice("multica-auth/".length)}`
+            : rawPathname;
+  const normalized = strippedPathname.replace(/^\/+/, "");
+  const pathname =
+    normalized === "health"
+      ? "/health"
+      : normalized.startsWith("auth/") || normalized === "auth"
+        ? `/${normalized}`
+        : normalized.startsWith("api/") || normalized === "api"
+          ? `/${normalized}`
+          : `/api/${normalized}`;
+  return `${pathname}${url.search}`;
+}
+
+async function proxyMulticaRequest({
+  path: pathValue = "/",
+  method = "GET",
+  headers = {},
+  bodyBase64 = null,
+} = {}) {
+  const baseUrl = (process.env.MULTICA_API_URL || "http://localhost:18080").replace(/\/+$/, "");
+  if (!isLocalhostUrl(baseUrl)) {
+    throw new Error("MULTICA_API_URL must point to localhost or 127.0.0.1");
+  }
+
+  const requestHeaders = new Headers();
+  for (const [key, value] of Object.entries(headers)) {
+    if (typeof value === "string") {
+      requestHeaders.set(key, value);
+    }
+  }
+  requestHeaders.delete("host");
+  requestHeaders.delete("content-length");
+  requestHeaders.delete("authorization");
+
+  const token = process.env.MULTICA_PAT || readMulticaPatFromFile();
+  if (token) {
+    process.env.MULTICA_PAT = token;
+    requestHeaders.set("authorization", `Bearer ${token}`);
+  }
+
+  const upperMethod = String(method || "GET").toUpperCase();
+  const init = {
+    method: upperMethod,
+    headers: requestHeaders,
+    redirect: "manual",
+    cache: "no-store",
+  };
+
+  if (upperMethod !== "GET" && upperMethod !== "HEAD" && bodyBase64) {
+    init.body = Buffer.from(bodyBase64, "base64");
+  }
+
+  const upstream = await fetch(`${baseUrl}${normalizeMulticaPath(pathValue)}`, init);
+  const bodyBuffer = Buffer.from(await upstream.arrayBuffer());
+
+  return {
+    status: upstream.status,
+    headers: Array.from(upstream.headers.entries()),
+    bodyBase64: bodyBuffer.length > 0 ? bodyBuffer.toString("base64") : null,
+  };
+}
+
+function cleanupMulticaWsProxy() {
+  if (multicaWsProxyServer) {
+    try {
+      for (const client of multicaWsProxyServer.clients) {
+        client.terminate();
+      }
+    } catch {}
+    try {
+      multicaWsProxyServer.close();
+    } catch {}
+  }
+
+  if (multicaWsProxyHttpServer) {
+    try {
+      multicaWsProxyHttpServer.close();
+    } catch {}
+  }
+
+  multicaWsProxyServer = null;
+  multicaWsProxyHttpServer = null;
+  multicaWsProxyUrl = null;
+}
+
+async function startMulticaWsProxy() {
+  cleanupMulticaWsProxy();
+
+  const upstreamWsUrl = process.env.MULTICA_WS_URL || null;
+  if (!upstreamWsUrl || !isLocalhostUrl(upstreamWsUrl)) {
+    multicaWsProxyUrl = upstreamWsUrl;
+    return multicaWsProxyUrl;
+  }
+
+  const httpServer = createServer();
+  const wss = new WebSocketServer({ noServer: true });
+
+  httpServer.on("upgrade", (request, socket, head) => {
+    const clientUrl = new URL(request.url || "/ws", "http://127.0.0.1");
+    if (clientUrl.pathname !== "/ws") {
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(request, socket, head, (clientSocket) => {
+      const upstreamUrl = new URL(upstreamWsUrl);
+      const workspaceId = clientUrl.searchParams.get("workspace_id");
+      if (workspaceId) {
+        upstreamUrl.searchParams.set("workspace_id", workspaceId);
+      } else {
+        upstreamUrl.searchParams.delete("workspace_id");
+      }
+
+      const token = process.env.MULTICA_PAT || readMulticaPatFromFile();
+      if (token) {
+        process.env.MULTICA_PAT = token;
+        upstreamUrl.searchParams.set("token", token);
+      } else {
+        upstreamUrl.searchParams.delete("token");
+      }
+
+      const upstreamSocket = new WebSocket(upstreamUrl.toString());
+
+      clientSocket.on("message", (data, isBinary) => {
+        if (upstreamSocket.readyState === WebSocket.OPEN) {
+          upstreamSocket.send(data, { binary: isBinary });
+        }
+      });
+
+      upstreamSocket.on("message", (data, isBinary) => {
+        if (clientSocket.readyState === WebSocket.OPEN) {
+          clientSocket.send(data, { binary: isBinary });
+        }
+      });
+
+      clientSocket.on("close", () => {
+        if (upstreamSocket.readyState === WebSocket.OPEN || upstreamSocket.readyState === WebSocket.CONNECTING) {
+          upstreamSocket.close();
+        }
+      });
+
+      upstreamSocket.on("close", () => {
+        if (clientSocket.readyState === WebSocket.OPEN || clientSocket.readyState === WebSocket.CONNECTING) {
+          clientSocket.close();
+        }
+      });
+
+      clientSocket.on("error", () => {
+        if (upstreamSocket.readyState === WebSocket.OPEN || upstreamSocket.readyState === WebSocket.CONNECTING) {
+          upstreamSocket.close();
+        }
+      });
+
+      upstreamSocket.on("error", () => {
+        if (clientSocket.readyState === WebSocket.OPEN || clientSocket.readyState === WebSocket.CONNECTING) {
+          clientSocket.close();
+        }
+      });
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    httpServer.once("error", reject);
+    httpServer.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = httpServer.address();
+  if (!address || typeof address !== "object") {
+    throw new Error("Could not start Multica WebSocket proxy");
+  }
+
+  multicaWsProxyHttpServer = httpServer;
+  multicaWsProxyServer = wss;
+  multicaWsProxyUrl = `ws://127.0.0.1:${address.port}/ws`;
+  return multicaWsProxyUrl;
 }
 
 function spawnBackend(command, args, env) {
@@ -440,6 +643,7 @@ function configureAutoUpdates() {
 }
 
 function cleanupBackends() {
+  cleanupMulticaWsProxy();
   for (const child of backendChildren) {
     child.kill("SIGTERM");
   }
@@ -469,6 +673,9 @@ function handleCriticalBackendExit(label, code, signal, peerChild) {
   app.quit();
 }
 
+ipcMain.removeHandler("multica:fetch");
+ipcMain.handle("multica:fetch", async (_event, request) => proxyMulticaRequest(request));
+
 async function createWindow() {
   // If MULTICA_API_URL is already set (e.g. dev server on 8080), skip embedded server
   // so Cabinet shares the same database as the daemon.
@@ -490,6 +697,12 @@ async function createWindow() {
   }
 
   const runtime = await startEmbeddedCabinet();
+  const proxiedWsUrl = await startMulticaWsProxy();
+  if (proxiedWsUrl) {
+    process.env.CABINET_MULTICA_WS_PROXY_URL = proxiedWsUrl;
+  } else {
+    delete process.env.CABINET_MULTICA_WS_PROXY_URL;
+  }
 
   mainWindow = new BrowserWindow({
     width: 1480,
@@ -502,7 +715,7 @@ async function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
-      sandbox: false,
+      sandbox: true,
     },
   });
 
