@@ -61,6 +61,7 @@ import { superviseService } from "./service-supervisor";
 import { createTerminalServerModule } from "./services/terminal-server.module";
 import { createMulticaPollerModule } from "./services/multica-poller.module";
 import { createTelegramModule } from "./services/telegram.module";
+import { writeCabinetDaemonHealthResponse } from "./cabinet-daemon-health";
 
 const PORT = getDaemonPort();
 const AGENTS_DIR = path.join(DATA_DIR, ".agents");
@@ -886,7 +887,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   const url = new URL(req.url || "", `http://localhost:${PORT}`);
-  if (url.pathname !== "/health" && !isDaemonTokenValid(requestToken(req, url))) {
+  const isHealthRequest = url.pathname === "/health" && req.method === "GET";
+  if (!isHealthRequest && !isDaemonTokenValid(requestToken(req, url))) {
     rejectUnauthorized(res);
     return;
   }
@@ -1031,23 +1033,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Health check
-  if (url.pathname === "/health") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        status: "ok",
-        ptySessions: sessions.size,
-        scheduledJobs: scheduledJobs.size,
-        scheduledHeartbeats: scheduledHeartbeats.size,
-        scheduledHealthChecks: scheduledHealthChecks.size,
-        subscribers: subscribers.length,
-        services: serviceModules.map((module) => ({
-          name: module.name,
-          ...module.health(),
-        })),
-      })
-    );
+  if (isHealthRequest) {
+    writeCabinetDaemonHealthResponse(res, serviceModules);
     return;
   }
 
