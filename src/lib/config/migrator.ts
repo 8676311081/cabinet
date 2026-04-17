@@ -1,17 +1,12 @@
 import fs from "node:fs/promises";
-import path from "node:path";
-import type { Dirent } from "node:fs";
-import matter from "gray-matter";
 import {
   DEFAULT_CABINET_CONFIG,
   parseCabinetConfig,
   type CabinetConfig,
   type CabinetIntegrationConfig,
   type CabinetSchedule,
-  type PersonaRuntimeConfig,
 } from "./schema";
 import {
-  getAgentsDir,
   getCabinetConfigDir,
   getCabinetConfigMigratedAtPath,
   getLegacyIntegrationsPath,
@@ -216,37 +211,6 @@ function normalizeLegacySchedules(raw: unknown): CabinetSchedule[] {
   });
 }
 
-function extractPersonaRuntime(frontmatter: Record<string, unknown>): PersonaRuntimeConfig {
-  const runtime: PersonaRuntimeConfig = {};
-
-  if (typeof frontmatter.provider === "string") {
-    runtime.provider = frontmatter.provider;
-  }
-  if (typeof frontmatter.heartbeat === "string") {
-    runtime.heartbeat = frontmatter.heartbeat;
-  }
-  if (typeof frontmatter.budget === "number") {
-    runtime.budget = frontmatter.budget;
-  }
-  if (typeof frontmatter.active === "boolean") {
-    runtime.active = frontmatter.active;
-  }
-  if (typeof frontmatter.workdir === "string") {
-    runtime.workdir = frontmatter.workdir;
-  }
-  if (typeof frontmatter.workspace === "string") {
-    runtime.workspace = frontmatter.workspace;
-  }
-  if (typeof frontmatter.setupComplete === "boolean") {
-    runtime.setupComplete = frontmatter.setupComplete;
-  }
-  if (typeof frontmatter.multica_runtime_id === "string" && frontmatter.multica_runtime_id.trim()) {
-    runtime.multicaRuntimeId = frontmatter.multica_runtime_id.trim();
-  }
-
-  return runtime;
-}
-
 async function readLegacySchedules(dataDir: string): Promise<CabinetSchedule[]> {
   for (const filePath of getLegacySchedulePaths(dataDir)) {
     try {
@@ -283,75 +247,16 @@ async function readLegacyIntegrations(dataDir: string): Promise<CabinetIntegrati
   }
 }
 
-async function readPersonaRuntimeConfig(dataDir: string): Promise<Record<string, PersonaRuntimeConfig>> {
-  const agentsDir = getAgentsDir(dataDir);
-  const personas: Record<string, PersonaRuntimeConfig> = {};
-
-  let entries: Dirent[];
-  try {
-    entries = await fs.readdir(agentsDir, { withFileTypes: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return personas;
-    }
-    throw error;
-  }
-
-  for (const entry of entries) {
-    if (entry.name.startsWith(".")) {
-      continue;
-    }
-
-    let slug: string | null = null;
-    let personaPath: string | null = null;
-
-    if (entry.isDirectory()) {
-      slug = entry.name;
-      personaPath = path.join(agentsDir, entry.name, "persona.md");
-    } else if (entry.isFile() && entry.name.endsWith(".md")) {
-      slug = entry.name.replace(/\.md$/, "");
-      personaPath = path.join(agentsDir, entry.name);
-    }
-
-    if (!slug || !personaPath) {
-      continue;
-    }
-
-    try {
-      const rawPersona = await fs.readFile(personaPath, "utf8");
-      const parsed = matter(rawPersona);
-      const runtime = extractPersonaRuntime(parsed.data);
-      if (Object.keys(runtime).length > 0) {
-        personas[slug] = runtime;
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        continue;
-      }
-      throw new Error(
-        `Failed to migrate persona runtime from ${personaPath}: ${(error as Error).message}`,
-        { cause: error },
-      );
-    }
-  }
-
-  return personas;
-}
-
 export async function migrateFromLegacy(dataDir: string): Promise<CabinetConfig> {
-  const [integrations, schedules, personas] = await Promise.all([
+  const [integrations, schedules] = await Promise.all([
     readLegacyIntegrations(dataDir),
     readLegacySchedules(dataDir),
-    readPersonaRuntimeConfig(dataDir),
   ]);
 
   const migrated = parseCabinetConfig({
     version: 1,
     integrations,
     schedules,
-    runtime: {
-      personas,
-    },
   });
 
   await fs.mkdir(getCabinetConfigDir(dataDir), { recursive: true });

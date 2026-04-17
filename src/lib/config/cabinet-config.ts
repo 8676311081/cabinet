@@ -47,6 +47,15 @@ async function readCabinetConfigFile(dataDir: string): Promise<CabinetConfig> {
     );
   }
 
+  if (
+    parsedJson !== null &&
+    typeof parsedJson === "object" &&
+    !Array.isArray(parsedJson) &&
+    "runtime" in parsedJson
+  ) {
+    delete (parsedJson as Record<string, unknown>).runtime;
+  }
+
   try {
     return parseCabinetConfig(parsedJson);
   } catch (error) {
