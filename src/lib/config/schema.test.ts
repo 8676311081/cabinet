@@ -16,23 +16,9 @@ test("parseCabinetConfig accepts a valid CabinetConfig", () => {
         enabled: true,
       },
     ],
-    runtime: {
-      personas: {
-        ceo: {
-          provider: "codex-cli",
-          heartbeat: "0 9 * * 1-5",
-          active: true,
-          workdir: "/data",
-          workspace: "/",
-          setupComplete: true,
-          multicaRuntimeId: "runtime-123",
-        },
-      },
-    },
   });
 
   assert.equal(parsed.version, 1);
-  assert.equal(parsed.runtime.personas.ceo?.multicaRuntimeId, "runtime-123");
   assert.equal(parsed.schedules[0]?.schedule, "0 9 * * 1-5");
 });
 
@@ -41,7 +27,6 @@ test("parseCabinetConfig rejects missing version and invalid field types", () =>
     () => parseCabinetConfig({
       integrations: DEFAULT_CABINET_CONFIG.integrations,
       schedules: [],
-      runtime: { personas: {} },
     }),
     /version/i,
   );

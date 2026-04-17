@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+/**
+ * cabinet.config.json holds *global operator config* only:
+ *   - integrations (MCP servers, notifications, scheduling policy)
+ *   - health-check schedules
+ *
+ * Per-agent runtime settings live in `.agents/<slug>/persona.md` frontmatter.
+ * Provider selection lives in `.agents/.config/providers.json`.
+ * Company profile lives in `.agents/.config/company.json`.
+ * Do not re-introduce a `runtime.personas` mirror here — it was removed
+ * because it duplicated persona.md without any consumer.
+ */
+
 const mcpServerSchema = z.object({
   name: z.string(),
   command: z.string(),
@@ -51,30 +63,15 @@ const cabinetScheduleSchema = z.object({
   lastReportId: z.string().optional(),
 }).strict();
 
-const personaRuntimeSchema = z.object({
-  provider: z.string().optional(),
-  heartbeat: z.string().optional(),
-  budget: z.number().optional(),
-  active: z.boolean().optional(),
-  workdir: z.string().optional(),
-  workspace: z.string().optional(),
-  setupComplete: z.boolean().optional(),
-  multicaRuntimeId: z.string().optional(),
-}).strict();
-
 const cabinetConfigSchema = z.object({
   version: z.literal(1),
   integrations: integrationConfigSchema,
   schedules: z.array(cabinetScheduleSchema),
-  runtime: z.object({
-    personas: z.record(z.string(), personaRuntimeSchema),
-  }).strict(),
 }).strict();
 
 export type CabinetConfig = z.infer<typeof cabinetConfigSchema>;
 export type CabinetIntegrationConfig = z.infer<typeof integrationConfigSchema>;
 export type CabinetSchedule = z.infer<typeof cabinetScheduleSchema>;
-export type PersonaRuntimeConfig = z.infer<typeof personaRuntimeSchema>;
 
 export const DEFAULT_CABINET_CONFIG: CabinetConfig = {
   version: 1,
@@ -148,9 +145,6 @@ export const DEFAULT_CABINET_CONFIG: CabinetConfig = {
     },
   },
   schedules: [],
-  runtime: {
-    personas: {},
-  },
 };
 
 export function parseCabinetConfig(raw: unknown): CabinetConfig {
