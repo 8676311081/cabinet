@@ -1398,15 +1398,15 @@ async function pollResponses(): Promise<void> {
         }
 
         tracking.multicaErrorCount = 0;
-        const isTerminal = ["done", "cancelled", "blocked"].includes(issue.status);
-        const isRunning = issue.status === "in_progress";
+        const isTerminal = ["done", "cancelled", "blocked", "in_review"].includes(issue.status);
+        const statusChanged = tracking.lastStatus !== issue.status;
 
-        // --- Live progress bar ---
-        if (isRunning) {
+        // --- Live progress bar (for non-terminal states) ---
+        if (!isTerminal) {
           const progressText = buildProgressBar(tracking.identifier, now - tracking.createdAt, issue.status);
 
           if (!tracking.progressMessageId) {
-            // First time seeing running — send progress message
+            // First time — send progress message
             const result = await telegramCall<{ message_id: number }>("sendMessage", {
               chat_id: tracking.chatId,
               text: progressText,
@@ -1423,8 +1423,10 @@ async function pollResponses(): Promise<void> {
               text: progressText,
             }, 10_000);
           }
-          tracking.lastStatus = issue.status;
         }
+
+        // Always track status
+        if (statusChanged) tracking.lastStatus = issue.status;
 
         // --- Track latest comment silently ---
         const comments = await multicaGet<Array<{
