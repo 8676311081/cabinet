@@ -9,6 +9,8 @@ import { reloadDaemonSchedules } from "@/lib/agents/daemon-client";
 import { getRunningConversationCounts } from "@/lib/agents/conversation-store";
 import { ensureAgentScaffold } from "@/lib/agents/scaffold";
 import { getDefaultProviderId } from "@/lib/agents/provider-runtime";
+import { assertValidSlug } from "@/lib/agents/persona/slug-utils";
+import { HttpError } from "@/lib/http/create-handler";
 
 // Initialize heartbeats on first request
 let initialized = false;
@@ -35,22 +37,33 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { slug, ...personaData } = body;
+  try {
+    const body = await req.json();
+    const { slug, ...personaData } = body;
 
-  if (!slug) {
-    return NextResponse.json({ error: "slug is required" }, { status: 400 });
+    if (!slug) {
+      return NextResponse.json({ error: "slug is required" }, { status: 400 });
+    }
+
+    assertValidSlug(slug);
+
+    await writePersona(slug, {
+      provider: personaData.provider || getDefaultProviderId(),
+      ...personaData,
+    });
+
+    const agentDir = path.join(DATA_DIR, ".agents", slug);
+    await ensureAgentScaffold(agentDir);
+
+    await reloadDaemonSchedules().catch(() => {});
+
+    return NextResponse.json({ ok: true }, { status: 201 });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: "internal_error", message }, { status: 500 });
   }
-
-  await writePersona(slug, {
-    provider: personaData.provider || getDefaultProviderId(),
-    ...personaData,
-  });
-
-  const agentDir = path.join(DATA_DIR, ".agents", slug);
-  await ensureAgentScaffold(agentDir);
-
-  await reloadDaemonSchedules().catch(() => {});
-
-  return NextResponse.json({ ok: true }, { status: 201 });
 }

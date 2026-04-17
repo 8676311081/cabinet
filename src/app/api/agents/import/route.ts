@@ -8,6 +8,7 @@ import {
   HttpError,
   createHandler,
 } from "@/lib/http/create-handler";
+import { assertValidSlug } from "@/lib/agents/persona/slug-utils";
 
 async function ensureDir(dir: string) {
   try { await fs.mkdir(dir, { recursive: true }); } catch { /* exists */ }
@@ -22,11 +23,14 @@ export const POST = createHandler({
         throw new HttpError(400, "Invalid bundle format");
       }
 
+      assertValidSlug(bundle.agent.slug);
+
       let slug = bundle.agent.slug;
       const agentDir = path.join(DATA_DIR, ".agents", slug);
       try {
         await fs.access(path.join(agentDir, "persona.md"));
         slug = `${slug}-imported-${Date.now().toString(36).slice(-4)}`;
+        assertValidSlug(slug);
       } catch { /* doesn't exist, use original slug */ }
 
       const fm = bundle.agent.frontmatter;
@@ -71,6 +75,9 @@ export const POST = createHandler({
         message: `Agent "${fm.name || slug}" imported successfully (paused by default).`,
       };
     } catch (err) {
+      if (err instanceof HttpError) {
+        throw err;
+      }
       throw new HttpError(
         500,
         `Import failed: ${err instanceof Error ? err.message : "unknown error"}`

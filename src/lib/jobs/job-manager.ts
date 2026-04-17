@@ -17,6 +17,7 @@ import {
   normalizeJobId,
 } from "@/lib/jobs/job-normalization";
 import { resolveEnabledProviderId } from "@/lib/agents/provider-settings";
+import { assertValidSlug } from "@/lib/agents/persona/slug-utils";
 
 const JOBS_DIR = path.join(DATA_DIR, ".jobs");
 const AGENTS_DIR = path.join(DATA_DIR, ".agents");
@@ -109,6 +110,7 @@ export async function loadAllJobs(): Promise<JobConfig[]> {
 
 /** Load jobs for a specific agent */
 export async function loadAgentJobsBySlug(agentSlug: string): Promise<JobConfig[]> {
+  assertValidSlug(agentSlug, "agentSlug");
   const agentJobsDir = path.join(AGENTS_DIR, agentSlug, "jobs");
   if (!(await fileExists(agentJobsDir))) return [];
 
@@ -130,6 +132,7 @@ export async function loadAgentJobsBySlug(agentSlug: string): Promise<JobConfig[
 
 /** Save a job to the appropriate directory based on agentSlug */
 export async function saveAgentJob(agentSlug: string, job: JobConfig): Promise<void> {
+  assertValidSlug(agentSlug, "agentSlug");
   const agentJobsDir = path.join(AGENTS_DIR, agentSlug, "jobs");
   await ensureDirectory(agentJobsDir);
   const normalized = normalizeJobConfig(
@@ -152,6 +155,7 @@ export async function saveAgentJob(agentSlug: string, job: JobConfig): Promise<v
 
 /** Delete a job from the agent's jobs directory */
 export async function deleteAgentJob(agentSlug: string, jobId: string): Promise<void> {
+  assertValidSlug(agentSlug, "agentSlug");
   const fs = await import("fs/promises");
   const jobsDir = path.join(AGENTS_DIR, agentSlug, "jobs");
   if (!(await fileExists(jobsDir))) return;

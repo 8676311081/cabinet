@@ -8,6 +8,7 @@ import {
   createGetHandler,
   createHandler,
 } from "@/lib/http/create-handler";
+import { assertValidSlug } from "@/lib/agents/persona/slug-utils";
 
 /**
  * GET /api/agents/scheduler — Get scheduler status
@@ -52,6 +53,26 @@ export const POST = createHandler({
   handler: async (_input, req) => {
     const body = await req.json();
     const { action, slugs, exclude = [] } = body;
+    const targetSlugs = slugs ?? [];
+
+    if (!Array.isArray(targetSlugs)) {
+      throw new HttpError(400, "slugs must be an array");
+    }
+    if (!Array.isArray(exclude)) {
+      throw new HttpError(400, "exclude must be an array");
+    }
+    for (const slug of targetSlugs) {
+      if (typeof slug !== "string") {
+        throw new HttpError(400, "slugs must contain strings");
+      }
+      assertValidSlug(slug);
+    }
+    for (const slug of exclude) {
+      if (typeof slug !== "string") {
+        throw new HttpError(400, "exclude must contain strings");
+      }
+      assertValidSlug(slug, "exclude");
+    }
 
     const personas = await listPersonas();
 
@@ -88,7 +109,6 @@ export const POST = createHandler({
 
       case "activate": {
         // Activate specific agents
-        const targetSlugs = slugs || [];
         let count = 0;
         for (const slug of targetSlugs) {
           const p = personas.find((pp) => pp.slug === slug);
@@ -103,7 +123,6 @@ export const POST = createHandler({
 
       case "pause": {
         // Pause specific agents
-        const targetSlugs = slugs || [];
         let count = 0;
         for (const slug of targetSlugs) {
           const p = personas.find((pp) => pp.slug === slug);

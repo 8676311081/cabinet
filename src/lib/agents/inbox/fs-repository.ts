@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import fs from "fs/promises";
 import path from "path";
+import { assertValidSlug } from "@/lib/agents/persona/slug-utils";
 import { ensureDirectory, fileExists } from "@/lib/storage/fs-operations";
 import {
   sortTasks,
@@ -19,6 +20,7 @@ export class FsTaskInboxRepository implements TaskInboxRepository {
   }
 
   private taskDir(agentSlug: string): string {
+    assertValidSlug(agentSlug, "agentSlug");
     return path.join(this.agentsDir, agentSlug, "tasks");
   }
 
@@ -31,6 +33,8 @@ export class FsTaskInboxRepository implements TaskInboxRepository {
   }
 
   async createTask(task: CreateAgentTaskInput): Promise<AgentTask> {
+    assertValidSlug(task.fromAgent, "fromAgent");
+    assertValidSlug(task.toAgent, "toAgent");
     await this.initTaskDir(task.toAgent);
 
     const full: AgentTask = {
@@ -51,6 +55,7 @@ export class FsTaskInboxRepository implements TaskInboxRepository {
   }
 
   async getTasksForAgent(agentSlug: string, statusFilter?: TaskStatus): Promise<AgentTask[]> {
+    assertValidSlug(agentSlug, "agentSlug");
     const dir = this.taskDir(agentSlug);
     if (!(await fileExists(dir))) return [];
 
@@ -74,6 +79,7 @@ export class FsTaskInboxRepository implements TaskInboxRepository {
   }
 
   async getTask(agentSlug: string, taskId: string): Promise<AgentTask | null> {
+    assertValidSlug(agentSlug, "agentSlug");
     const filePath = this.taskFilePath(agentSlug, taskId);
     if (!(await fileExists(filePath))) return null;
 
@@ -90,6 +96,7 @@ export class FsTaskInboxRepository implements TaskInboxRepository {
     taskId: string,
     updates: UpdateAgentTaskInput,
   ): Promise<AgentTask | null> {
+    assertValidSlug(agentSlug, "agentSlug");
     const task = await this.getTask(agentSlug, taskId);
     if (!task) return null;
 
@@ -128,6 +135,7 @@ export class FsTaskInboxRepository implements TaskInboxRepository {
   }
 
   async getPendingTaskCount(agentSlug: string): Promise<number> {
+    assertValidSlug(agentSlug, "agentSlug");
     const tasks = await this.getTasksForAgent(agentSlug, "pending");
     return tasks.length;
   }

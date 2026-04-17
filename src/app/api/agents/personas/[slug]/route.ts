@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import path from "path";
 import fs from "fs/promises";
 import { DATA_DIR } from "@/lib/storage/path-utils";
@@ -16,95 +16,114 @@ import {
 import { startManualHeartbeat } from "@/lib/agents/heartbeat";
 import { updateGoal, getGoalHistory } from "@/lib/agents/goal-manager";
 import { reloadDaemonSchedules } from "@/lib/agents/daemon-client";
+import {
+  HttpError,
+  createGetHandler,
+  createHandler,
+} from "@/lib/http/create-handler";
+import { assertValidSlug } from "@/lib/agents/persona/slug-utils";
 
 type RouteParams = { params: Promise<{ slug: string }> };
 
 export async function GET(req: NextRequest, { params }: RouteParams) {
   const { slug } = await params;
-  const { searchParams } = new URL(req.url);
+  return createGetHandler({
+    handler: async () => {
+      assertValidSlug(slug);
+      const { searchParams } = new URL(req.url);
 
-  // Session output retrieval
-  const sessionTs = searchParams.get("session");
-  if (sessionTs) {
-    const sessionsDir = path.join(DATA_DIR, ".agents", slug, "sessions");
-    const sessionFile = path.join(sessionsDir, `${sessionTs.replace(/[:.]/g, "-")}.txt`);
-    // Validate path stays within sessions dir
-    if (!sessionFile.startsWith(sessionsDir)) {
-      return NextResponse.json({ error: "Invalid path" }, { status: 400 });
-    }
-    try {
-      const output = await fs.readFile(sessionFile, "utf-8");
-      return NextResponse.json({ output });
-    } catch {
-      return NextResponse.json({ output: null });
-    }
-  }
+      const sessionTs = searchParams.get("session");
+      if (sessionTs) {
+        const sessionsDir = path.join(DATA_DIR, ".agents", slug, "sessions");
+        const sessionFile = path.join(sessionsDir, `${sessionTs.replace(/[:.]/g, "-")}.txt`);
+        if (!sessionFile.startsWith(sessionsDir)) {
+          throw new HttpError(400, "Invalid path");
+        }
+        try {
+          const output = await fs.readFile(sessionFile, "utf-8");
+          return { output };
+        } catch {
+          return { output: null };
+        }
+      }
 
-  const persona = await readPersona(slug);
-  if (!persona) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
+      const persona = await readPersona(slug);
+      if (!persona) {
+        throw new HttpError(404, "Not found");
+      }
 
-  const memoryFiles = await listMemoryFiles(slug);
-  const memory: Record<string, string> = {};
-  for (const file of memoryFiles) {
-    if (file.endsWith(".md")) {
-      memory[file] = await readMemory(slug, file);
-    }
-  }
+      const memoryFiles = await listMemoryFiles(slug);
+      const memory: Record<string, string> = {};
+      for (const file of memoryFiles) {
+        if (file.endsWith(".md")) {
+          memory[file] = await readMemory(slug, file);
+        }
+      }
 
-  const inbox = await readInbox(slug);
-  const history = await getHeartbeatHistory(slug);
-  const goalHistory = await getGoalHistory(slug);
+      const inbox = await readInbox(slug);
+      const history = await getHeartbeatHistory(slug);
+      const goalHistory = await getGoalHistory(slug);
 
-  return NextResponse.json({ persona, memory, inbox, history, goalHistory });
+      return { persona, memory, inbox, history, goalHistory };
+    },
+  })(req);
 }
 
 export async function PUT(req: NextRequest, { params }: RouteParams) {
   const { slug } = await params;
-  const body = await req.json();
+  return createHandler({
+    handler: async () => {
+      assertValidSlug(slug);
+      const body = await req.json();
 
-  // Handle different update types
-  if (body.action === "toggle") {
-    const persona = await readPersona(slug);
-    if (!persona) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    await writePersona(slug, { active: !persona.active });
-    await reloadDaemonSchedules().catch(() => {});
-    return NextResponse.json({ ok: true, active: !persona.active });
-  }
+      if (body.action === "toggle") {
+        const persona = await readPersona(slug);
+        if (!persona) {
+          throw new HttpError(404, "Not found");
+        }
+        await writePersona(slug, { active: !persona.active });
+        await reloadDaemonSchedules().catch(() => {});
+        return { ok: true, active: !persona.active };
+      }
 
-  if (body.action === "run") {
-    const sessionId = await startManualHeartbeat(slug);
-    if (!sessionId) {
-      return NextResponse.json({ ok: false, message: "Agent inactive or over budget" }, { status: 400 });
-    }
-    return NextResponse.json({ ok: true, sessionId });
-  }
+      if (body.action === "run") {
+        const sessionId = await startManualHeartbeat(slug);
+        if (!sessionId) {
+          throw new HttpError(400, "Agent inactive or over budget");
+        }
+        return { ok: true, sessionId };
+      }
 
-  if (body.action === "updateMemory") {
-    await writeMemory(slug, body.file, body.content);
-    return NextResponse.json({ ok: true });
-  }
+      if (body.action === "updateMemory") {
+        await writeMemory(slug, body.file, body.content);
+        return { ok: true };
+      }
 
-  if (body.action === "sendMessage") {
-    await sendMessage(slug, body.to, body.message);
-    return NextResponse.json({ ok: true });
-  }
+      if (body.action === "sendMessage") {
+        await sendMessage(slug, body.to, body.message);
+        return { ok: true };
+      }
 
-  if (body.action === "updateGoal") {
-    const result = await updateGoal(slug, body.metric, body.increment || 1);
-    return NextResponse.json({ ok: true, goal: result });
-  }
+      if (body.action === "updateGoal") {
+        const result = await updateGoal(slug, body.metric, body.increment || 1);
+        return { ok: true, goal: result };
+      }
 
-  // Default: update persona
-  await writePersona(slug, body);
-  await reloadDaemonSchedules().catch(() => {});
-  return NextResponse.json({ ok: true });
+      await writePersona(slug, body);
+      await reloadDaemonSchedules().catch(() => {});
+      return { ok: true };
+    },
+  })(req);
 }
 
-export async function DELETE(_req: NextRequest, { params }: RouteParams) {
+export async function DELETE(req: NextRequest, { params }: RouteParams) {
   const { slug } = await params;
-  await deletePersona(slug);
-  await reloadDaemonSchedules().catch(() => {});
-  return NextResponse.json({ ok: true });
+  return createHandler<void, { ok: true }>({
+    handler: async () => {
+      assertValidSlug(slug);
+      await deletePersona(slug);
+      await reloadDaemonSchedules().catch(() => {});
+      return { ok: true };
+    },
+  })(req);
 }

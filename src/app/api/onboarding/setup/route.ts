@@ -3,6 +3,8 @@ import path from "path";
 import fs from "fs/promises";
 import matter from "gray-matter";
 import { DATA_DIR } from "@/lib/storage/path-utils";
+import { HttpError } from "@/lib/http/create-handler";
+import { assertValidSlug } from "@/lib/agents/persona/slug-utils";
 
 const AGENTS_DIR = path.join(DATA_DIR, ".agents");
 const LIBRARY_DIR = path.join(AGENTS_DIR, ".library");
@@ -24,6 +26,16 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as OnboardingRequest;
     const { answers, selectedAgents } = body;
+
+    if (!Array.isArray(selectedAgents)) {
+      throw new HttpError(400, "selectedAgents must be an array");
+    }
+    for (const slug of selectedAgents) {
+      if (typeof slug !== "string") {
+        throw new HttpError(400, "selectedAgents must contain strings");
+      }
+      assertValidSlug(slug, "selectedAgents");
+    }
 
     // 1. Save company config
     await fs.mkdir(CONFIG_DIR, { recursive: true });
@@ -159,6 +171,7 @@ export async function POST(req: NextRequest) {
 
     // Create channel directories
     for (const ch of channels) {
+      assertValidSlug(ch.slug, "channel");
       const chDir = path.join(CHAT_DIR, ch.slug);
       await fs.mkdir(chDir, { recursive: true });
       // Only create files if they don't exist (don't wipe existing messages)
@@ -170,6 +183,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true }, { status: 201 });
   } catch (error) {
+    if (error instanceof HttpError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -19,6 +19,7 @@ import { getGoalState, updateGoal } from "@/lib/agents/persona/goal-manager";
 import { startConversationRun } from "@/lib/agents/runtime/conversation-runner";
 import { reloadDaemonSchedules } from "@/lib/agents/runtime/daemon-client";
 import { getDaemonUrl, getOrCreateDaemonToken } from "@/lib/agents/runtime/daemon-auth";
+import { assertValidSlug } from "./slug-utils";
 
 interface HeartbeatContext {
   prompt: string;
@@ -29,6 +30,7 @@ interface HeartbeatContext {
 }
 
 async function buildHeartbeatContext(slug: string): Promise<HeartbeatContext | null> {
+  assertValidSlug(slug);
   const startTime = Date.now();
   const persona = await readPersona(slug);
   if (!persona || !persona.active) return null;
@@ -333,6 +335,7 @@ async function processHeartbeatOutput(
  * Returns null if the agent is inactive or over budget.
  */
 export async function runHeartbeat(slug: string): Promise<string | null> {
+  assertValidSlug(slug);
   const ctx = await buildHeartbeatContext(slug);
   if (!ctx) return null;
   const { prompt, persona, inbox, startTime, cwd } = ctx;
@@ -387,6 +390,7 @@ export async function runHeartbeat(slug: string): Promise<string | null> {
  * Returns sessionId for the frontend to connect a WebTerminal to.
  */
 export async function startManualHeartbeat(slug: string): Promise<string | null> {
+  assertValidSlug(slug);
   return runHeartbeat(slug);
 }
 
@@ -402,6 +406,7 @@ export async function runQuickResponse(
   humanMessage: string,
   channel: string,
 ): Promise<string> {
+  assertValidSlug(slug);
   const persona = await readPersona(slug);
   if (!persona) return "";
 

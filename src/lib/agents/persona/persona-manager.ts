@@ -14,6 +14,11 @@ import { getGoalState } from "@/lib/agents/persona/goal-manager";
 import type { GoalMetric, AgentType } from "@/types/agents";
 import { getDefaultProviderId } from "@/lib/agents/runtime/provider-runtime";
 import { resolveEnabledProviderId } from "@/lib/agents/provider/provider-settings";
+import {
+  assertValidFilename,
+  assertValidSlug,
+  isValidSlug,
+} from "./slug-utils";
 
 const AGENTS_DIR = path.join(DATA_DIR, ".agents");
 const MEMORY_DIR = path.join(AGENTS_DIR, ".memory");
@@ -24,10 +29,12 @@ const HISTORY_DIR = path.join(AGENTS_DIR, ".history");
 const runningHeartbeats = new Set<string>();
 
 export function markHeartbeatRunning(slug: string): void {
+  assertValidSlug(slug);
   runningHeartbeats.add(slug);
 }
 
 export function markHeartbeatComplete(slug: string): void {
+  assertValidSlug(slug);
   runningHeartbeats.delete(slug);
 }
 
@@ -154,6 +161,7 @@ export async function listPersonas(): Promise<AgentPersona[]> {
   for (const entry of entries) {
     // Directory-based agents: {slug}/persona.md (PRD format)
     if (entry.isDirectory && !entry.name.startsWith(".")) {
+      if (!isValidSlug(entry.name)) continue;
       const personaPath = path.join(AGENTS_DIR, entry.name, "persona.md");
       if (await fileExists(personaPath)) {
         const persona = await readPersona(entry.name);
@@ -163,7 +171,9 @@ export async function listPersonas(): Promise<AgentPersona[]> {
     }
     // Legacy flat-file agents: {slug}.md
     if (!entry.name.endsWith(".md") || entry.isDirectory) continue;
-    const persona = await readPersona(slugFromFilename(entry.name));
+    const slug = slugFromFilename(entry.name);
+    if (!isValidSlug(slug)) continue;
+    const persona = await readPersona(slug);
     if (persona && persona.role) personas.push(persona);
   }
 
@@ -171,6 +181,7 @@ export async function listPersonas(): Promise<AgentPersona[]> {
 }
 
 export async function readPersona(slug: string): Promise<AgentPersona | null> {
+  assertValidSlug(slug);
   // Try directory-based first: {slug}/persona.md
   let filePath = path.join(AGENTS_DIR, slug, "persona.md");
   if (!(await fileExists(filePath))) {
@@ -242,6 +253,7 @@ export async function readPersona(slug: string): Promise<AgentPersona | null> {
 }
 
 export async function writePersona(slug: string, persona: Partial<AgentPersona> & { body?: string }): Promise<void> {
+  assertValidSlug(slug);
   await initAgentsDir();
   // Use directory-based structure: {slug}/persona.md
   const agentDir = path.join(AGENTS_DIR, slug);
@@ -276,6 +288,7 @@ export async function writePersona(slug: string, persona: Partial<AgentPersona> 
 }
 
 export async function deletePersona(slug: string): Promise<void> {
+  assertValidSlug(slug);
   const fs = await import("fs/promises");
   // Try directory-based first
   const agentDir = path.join(AGENTS_DIR, slug);
@@ -292,6 +305,8 @@ export async function deletePersona(slug: string): Promise<void> {
 // --- Memory ---
 
 export async function readMemory(slug: string, file: string): Promise<string> {
+  assertValidSlug(slug);
+  assertValidFilename(file);
   const memDir = path.join(MEMORY_DIR, slug);
   await ensureDirectory(memDir);
   const filePath = path.join(memDir, file);
@@ -300,12 +315,15 @@ export async function readMemory(slug: string, file: string): Promise<string> {
 }
 
 export async function writeMemory(slug: string, file: string, content: string): Promise<void> {
+  assertValidSlug(slug);
+  assertValidFilename(file);
   const memDir = path.join(MEMORY_DIR, slug);
   await ensureDirectory(memDir);
   await writeFileContent(path.join(memDir, file), content);
 }
 
 export async function listMemoryFiles(slug: string): Promise<string[]> {
+  assertValidSlug(slug);
   const memDir = path.join(MEMORY_DIR, slug);
   await ensureDirectory(memDir);
   const entries = await listDirectory(memDir);
@@ -315,6 +333,8 @@ export async function listMemoryFiles(slug: string): Promise<string[]> {
 // --- Messages ---
 
 export async function sendMessage(from: string, to: string, message: string): Promise<void> {
+  assertValidSlug(from, "from");
+  assertValidSlug(to, "to");
   const inboxDir = path.join(MESSAGES_DIR, to);
   await ensureDirectory(inboxDir);
   const timestamp = new Date().toISOString();
@@ -324,6 +344,7 @@ export async function sendMessage(from: string, to: string, message: string): Pr
 }
 
 export async function readInbox(slug: string): Promise<Array<{ from: string; timestamp: string; message: string; filename: string }>> {
+  assertValidSlug(slug);
   const inboxDir = path.join(MESSAGES_DIR, slug);
   await ensureDirectory(inboxDir);
   const entries = await listDirectory(inboxDir);
@@ -345,6 +366,7 @@ export async function readInbox(slug: string): Promise<Array<{ from: string; tim
 }
 
 export async function clearInbox(slug: string): Promise<void> {
+  assertValidSlug(slug);
   const inboxDir = path.join(MESSAGES_DIR, slug);
   const fs = await import("fs/promises");
   const entries = await listDirectory(inboxDir).catch(() => []);
@@ -359,6 +381,7 @@ export async function clearInbox(slug: string): Promise<void> {
 
 export async function recordHeartbeat(record: HeartbeatRecord): Promise<void> {
   const slug = record.agentSlug;
+  assertValidSlug(slug, "agentSlug");
 
   // Append to history log
   const historyFile = path.join(HISTORY_DIR, `${slug}.jsonl`);
@@ -383,6 +406,7 @@ export async function recordHeartbeat(record: HeartbeatRecord): Promise<void> {
 }
 
 export async function getHeartbeatHistory(slug: string, limit = 20): Promise<HeartbeatRecord[]> {
+  assertValidSlug(slug);
   const historyFile = path.join(HISTORY_DIR, `${slug}.jsonl`);
   if (!(await fileExists(historyFile))) return [];
 
@@ -398,6 +422,7 @@ export async function getHeartbeatHistory(slug: string, limit = 20): Promise<Hea
 // --- Heartbeat Scheduler ---
 
 export function registerHeartbeat(slug: string, cronExpr: string): void {
+  assertValidSlug(slug);
   unregisterHeartbeat(slug);
   if (!cron.validate(cronExpr)) return;
 
@@ -411,6 +436,7 @@ export function registerHeartbeat(slug: string, cronExpr: string): void {
 }
 
 export function unregisterHeartbeat(slug: string): void {
+  assertValidSlug(slug);
   const existing = heartbeatJobs.get(slug);
   if (existing) {
     existing.stop();

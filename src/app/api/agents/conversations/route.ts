@@ -6,33 +6,48 @@ import {
 } from "@/lib/agents/conversation-runner";
 import { listConversationMetas } from "@/lib/agents/conversation-store";
 import { readMemory, writeMemory } from "@/lib/agents/persona-manager";
+import { HttpError } from "@/lib/http/create-handler";
+import { assertValidSlug } from "@/lib/agents/persona/slug-utils";
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const agentSlug = searchParams.get("agent") || undefined;
-  const pagePath = searchParams.get("pagePath") || undefined;
-  const trigger = searchParams.get("trigger") as
-    | "manual"
-    | "job"
-    | "heartbeat"
-    | null;
-  const status = searchParams.get("status") as
-    | "running"
-    | "completed"
-    | "failed"
-    | "cancelled"
-    | null;
-  const limit = parseInt(searchParams.get("limit") || "200", 10);
+  try {
+    const { searchParams } = new URL(req.url);
+    const agentSlug = searchParams.get("agent") || undefined;
+    const pagePath = searchParams.get("pagePath") || undefined;
+    const trigger = searchParams.get("trigger") as
+      | "manual"
+      | "job"
+      | "heartbeat"
+      | null;
+    const status = searchParams.get("status") as
+      | "running"
+      | "completed"
+      | "failed"
+      | "cancelled"
+      | null;
+    const limit = parseInt(searchParams.get("limit") || "200", 10);
 
-  const conversations = await listConversationMetas({
-    agentSlug: agentSlug && agentSlug !== "all" ? agentSlug : undefined,
-    pagePath: pagePath || undefined,
-    trigger: trigger || undefined,
-    status: status || undefined,
-    limit,
-  });
+    if (agentSlug && agentSlug !== "all") {
+      assertValidSlug(agentSlug, "agent");
+    }
 
-  return NextResponse.json({ conversations });
+    const conversations = await listConversationMetas({
+      agentSlug: agentSlug && agentSlug !== "all" ? agentSlug : undefined,
+      pagePath: pagePath || undefined,
+      trigger: trigger || undefined,
+      status: status || undefined,
+      limit,
+    });
+
+    return NextResponse.json({ conversations });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: "internal_error", message }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -62,6 +77,8 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    assertValidSlug(agentSlug, "agentSlug");
 
     const conversationInput =
       source === "editor" && pagePath
@@ -98,6 +115,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, conversation }, { status: 201 });
   } catch (error) {
+    if (error instanceof HttpError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

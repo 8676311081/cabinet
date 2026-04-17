@@ -14,6 +14,7 @@ import {
   createGetHandler,
   createHandler,
 } from "@/lib/http/create-handler";
+import { assertValidSlug } from "@/lib/agents/persona/slug-utils";
 
 type RouteParams = { params: Promise<{ id: string; jobId: string }> };
 
@@ -29,6 +30,7 @@ export async function GET(
   return createGetHandler({
     handler: async () => {
       try {
+        assertValidSlug(slug, "id");
         const jobs = await loadAgentJobsBySlug(slug);
         const job = jobs.find((j) => jobIdMatches(j.id, jobId));
         if (!job) {
@@ -55,6 +57,7 @@ export async function PUT(
   return createHandler({
     handler: async (_input, request) => {
       try {
+        assertValidSlug(slug, "id");
         const jobs = await loadAgentJobsBySlug(slug);
         const existing = jobs.find((j) => jobIdMatches(j.id, jobId));
         if (!existing) {
@@ -109,10 +112,14 @@ export async function DELETE(
   return createGetHandler({
     handler: async () => {
       try {
+        assertValidSlug(slug, "id");
         await deleteAgentJob(slug, jobId);
         await reloadDaemonSchedules().catch(() => {});
         return { ok: true };
       } catch (error) {
+        if (error instanceof HttpError) {
+          throw error;
+        }
         throw new HttpError(500, getErrorMessage(error));
       }
     },

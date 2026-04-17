@@ -11,6 +11,7 @@ import {
   createGetHandler,
   createHandler,
 } from "@/lib/http/create-handler";
+import { assertValidSlug } from "@/lib/agents/persona/slug-utils";
 
 const taskMutationSchema = z
   .object({
@@ -49,6 +50,7 @@ export const GET = createGetHandler({
       throw new HttpError(400, "agent query param required");
     }
 
+    assertValidSlug(agent, "agent");
     const tasks = await getTasksForAgent(agent, status ?? undefined);
     return { tasks };
   },
@@ -66,6 +68,7 @@ export const POST = createHandler({
         throw new HttpError(400, "agent, taskId, and status required");
       }
 
+      assertValidSlug(agent, "agent");
       const updated = await updateTask(agent, taskId, { status, result });
       if (!updated) {
         throw new HttpError(404, "Task not found");
@@ -90,6 +93,8 @@ export const POST = createHandler({
       throw new HttpError(400, "fromAgent, toAgent, and title required");
     }
 
+    assertValidSlug(fromAgent, "fromAgent");
+    assertValidSlug(toAgent, "toAgent");
     const task = await createTask({
       fromAgent,
       fromEmoji,

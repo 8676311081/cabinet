@@ -3,6 +3,8 @@ import path from "path";
 import fs from "fs/promises";
 import { DATA_DIR } from "@/lib/storage/path-utils";
 import { ensureAgentScaffold } from "@/lib/agents/scaffold";
+import { HttpError } from "@/lib/http/create-handler";
+import { assertValidSlug } from "@/lib/agents/persona/slug-utils";
 
 const LIBRARY_DIR = path.join(DATA_DIR, ".agents", ".library");
 const AGENTS_DIR = path.join(DATA_DIR, ".agents");
@@ -14,6 +16,7 @@ export async function POST(
   const { slug } = await params;
 
   try {
+    assertValidSlug(slug);
     const templateDir = path.join(LIBRARY_DIR, slug);
     const targetDir = path.join(AGENTS_DIR, slug);
 
@@ -46,6 +49,9 @@ export async function POST(
 
     return NextResponse.json({ ok: true, slug }, { status: 201 });
   } catch (error) {
+    if (error instanceof HttpError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

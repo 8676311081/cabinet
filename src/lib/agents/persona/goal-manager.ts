@@ -7,6 +7,7 @@ import {
   ensureDirectory,
 } from "@/lib/storage/fs-operations";
 import type { GoalMetric } from "@/types/agents";
+import { assertValidSlug } from "./slug-utils";
 
 const MEMORY_DIR = path.join(DATA_DIR, ".agents", ".memory");
 
@@ -43,6 +44,7 @@ function statePath(slug: string): string {
 }
 
 async function readState(slug: string): Promise<GoalState> {
+  assertValidSlug(slug);
   const fp = statePath(slug);
   if (!(await fileExists(fp))) {
     return { goals: {} };
@@ -57,6 +59,7 @@ async function readState(slug: string): Promise<GoalState> {
 }
 
 async function writeState(slug: string, state: GoalState): Promise<void> {
+  assertValidSlug(slug);
   const dir = path.join(MEMORY_DIR, slug);
   await ensureDirectory(dir);
   await writeFileContent(statePath(slug), JSON.stringify(state, null, 2));
@@ -69,6 +72,7 @@ async function writeState(slug: string, state: GoalState): Promise<void> {
 export async function getGoalState(
   slug: string
 ): Promise<Record<string, GoalEntry>> {
+  assertValidSlug(slug);
   const state = await readState(slug);
   return state.goals;
 }
@@ -82,6 +86,7 @@ export async function updateGoal(
   metric: string,
   increment: number = 1
 ): Promise<GoalEntry> {
+  assertValidSlug(slug);
   const state = await readState(slug);
 
   if (!state.goals[metric]) {
@@ -113,6 +118,7 @@ export async function resetGoalPeriod(
   slug: string,
   metric: string
 ): Promise<GoalEntry | null> {
+  assertValidSlug(slug);
   const state = await readState(slug);
   const goal = state.goals[metric];
   if (!goal) return null;
@@ -146,6 +152,7 @@ export async function resetGoalPeriod(
 export async function getGoalHistory(
   slug: string
 ): Promise<Record<string, { current: number; target: number; period_start: string; period_end: string; history: GoalHistoryEntry[] }>> {
+  assertValidSlug(slug);
   const state = await readState(slug);
   return state.goals;
 }
@@ -158,6 +165,7 @@ export function getGoalStatus(
   slug: string,
   goals: GoalMetric[]
 ): Record<string, GoalStatus> {
+  assertValidSlug(slug);
   // This is a sync computation against the provided GoalMetric data
   const result: Record<string, GoalStatus> = {};
 
@@ -188,6 +196,7 @@ export function getAllGoalsSummary(
   slug: string,
   goals: GoalMetric[]
 ): { total: number; onTrack: number; behind: number; critical: number } {
+  assertValidSlug(slug);
   const statuses = getGoalStatus(slug, goals);
   const values = Object.values(statuses);
 

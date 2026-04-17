@@ -1,4 +1,5 @@
 import { DATA_DIR } from "@/lib/storage/path-utils";
+import { assertValidSlug } from "@/lib/agents/persona/slug-utils";
 import { FsTaskInboxRepository } from "./fs-repository";
 import type {
   AgentTask,
@@ -23,6 +24,8 @@ export function resetTaskInboxRepository(): void {
 export async function createTask(
   task: CreateAgentTaskInput
 ): Promise<AgentTask> {
+  assertValidSlug(task.fromAgent, "fromAgent");
+  assertValidSlug(task.toAgent, "toAgent");
   return repository.createTask(task);
 }
 
@@ -30,6 +33,7 @@ export async function getTasksForAgent(
   agentSlug: string,
   statusFilter?: TaskStatus
 ): Promise<AgentTask[]> {
+  assertValidSlug(agentSlug, "agent");
   return repository.getTasksForAgent(agentSlug, statusFilter);
 }
 
@@ -37,6 +41,7 @@ export async function getTask(
   agentSlug: string,
   taskId: string
 ): Promise<AgentTask | null> {
+  assertValidSlug(agentSlug, "agent");
   return repository.getTask(agentSlug, taskId);
 }
 
@@ -45,6 +50,7 @@ export async function updateTask(
   taskId: string,
   updates: UpdateAgentTaskInput
 ): Promise<AgentTask | null> {
+  assertValidSlug(agentSlug, "agent");
   return repository.updateTask(agentSlug, taskId, updates);
 }
 
@@ -55,5 +61,6 @@ export async function getAllTasks(
 }
 
 export async function getPendingTaskCount(agentSlug: string): Promise<number> {
+  assertValidSlug(agentSlug, "agent");
   return repository.getPendingTaskCount(agentSlug);
 }
