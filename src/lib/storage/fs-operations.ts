@@ -71,6 +71,16 @@ export interface PathStat {
   isDirectory: boolean;
 }
 
+export async function getDirectorySignature(absPath: string): Promise<string | null> {
+  try {
+    const stat = await fs.stat(absPath);
+    const entries = await fs.readdir(absPath);
+    return `${stat.mtimeMs}-${entries.length}`;
+  } catch {
+    return null;
+  }
+}
+
 export async function statPath(absPath: string): Promise<PathStat | null> {
   try {
     const stat = await fs.stat(absPath);
