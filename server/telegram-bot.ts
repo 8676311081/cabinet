@@ -64,6 +64,8 @@ const RESPONSE_POLL_MS = 10_000;
 const ISSUE_TTL_MS = 2 * 60 * 60 * 1000;
 const ISSUE_PREFIX_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_ISSUES_PER_HOUR = 20;
+const MAX_CHATS_PER_HOUR = 60;
+const CHAT_TIMEOUT_MS = 180_000;
 const WORKSPACE_RESOLVE_RETRY_MS = 5_000;
 const ISSUES_PAGE_SIZE = 5;
 
@@ -152,6 +154,7 @@ let workspaceResolvePromise: Promise<string> | null = null;
 let lastWorkspaceResolveAt = 0;
 let trackedIssues = new Map<string, TrackedIssue>();
 let issueCountThisHour = 0;
+let chatCountThisHour = 0;
 let hourResetTimer: ReturnType<typeof setInterval> | null = null;
 let pollingResponses = false;
 
@@ -380,6 +383,26 @@ async function multicaPut<T = unknown>(urlPath: string, body: Record<string, unk
       headers: multicaHeaders(),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    if (res.status === 204) return null;
+    return res.json() as Promise<T>;
+  } catch {
+    return null;
+  }
+}
+
+function cabinetAppOrigin(): string {
+  return process.env.CABINET_APP_ORIGIN || "http://127.0.0.1:3000";
+}
+
+async function cabinetPost<T = unknown>(urlPath: string, body: Record<string, unknown>, timeoutMs = 10_000): Promise<T | null> {
+  try {
+    const res = await fetch(`${cabinetAppOrigin()}${urlPath}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return null;
     if (res.status === 204) return null;
@@ -704,16 +727,15 @@ async function handleCommand(chatId: number, text: string, messageId: number): P
       await sendMessage(chatId, [
         "👋 *欢迎使用 Cabinet Bot*",
         "",
-        "发送任意消息，自动创建任务交给 Agent 处理。",
+        "💬 *聊天模式*（默认）",
+        "直接发消息 → 和默认 Agent 聊天",
         "",
-        "📋 *任务管理*",
-        "/issues — 查看待办任务（可点击运行）",
-        "/projects — 按项目浏览任务",
-        "/status — 跟踪中的任务",
+        "📋 *任务模式*",
+        "`/task <内容>` → 创建可跟踪任务",
+        "`/agent <名称> <任务>` → 指派到特定 Agent",
         "",
-        "🤖 *智能体*",
-        "/agents — 查看可用智能体",
-        "/agent <名称> <任务> — 指定智能体执行",
+        "*浏览*",
+        "/issues /projects /status /agents",
         "",
         "/help — 完整帮助",
       ].join("\n"));
@@ -723,13 +745,16 @@ async function handleCommand(chatId: number, text: string, messageId: number): P
       await sendMessage(chatId, [
         "📖 *命令帮助*",
         "",
-        "*创建任务*",
-        "直接发文字 → 自动创建并指派默认 Agent",
+        "*聊天（默认）*",
+        "直接发文字 → 一次性 Agent 聊天（无记忆）",
+        "",
+        "*任务*",
+        "`/task 调研竞品` → 创建跟踪任务",
         "`/agent 二狗 调研竞品` → 指定 Agent",
         "",
         "*浏览任务*",
-        "/issues → 待办任务列表（带运行按钮）",
-        "/issues all → 所有状态的任务",
+        "/issues → 待办任务列表",
+        "/issues all → 所有状态",
         "/projects → 按项目浏览",
         "",
         "*管理*",
@@ -750,6 +775,16 @@ async function handleCommand(chatId: number, text: string, messageId: number): P
     case "/agent":
       await handleAgentTask(chatId, parts.slice(1), messageId);
       break;
+
+    case "/task": {
+      const taskText = parts.slice(1).join(" ").trim();
+      if (!taskText) {
+        await sendMessage(chatId, "用法: `/task <任务描述>`\n例: `/task 调研竞品定价`");
+      } else {
+        await createAndTrackIssue(chatId, messageId, taskText);
+      }
+      break;
+    }
 
     case "/cancel":
       await handleCancel(chatId, parts[1]);
@@ -1272,6 +1307,49 @@ async function handleCancel(chatId: number, identifier?: string): Promise<void> 
 // Issue creation
 // ---------------------------------------------------------------------------
 
+async function chatWithAgent(chatId: number, messageId: number, text: string): Promise<void> {
+  if (chatCountThisHour >= MAX_CHATS_PER_HOUR) {
+    await sendMessage(chatId, `⚠️ 每小时最多 ${MAX_CHATS_PER_HOUR} 条聊天，请稍后再试`, { replyTo: messageId });
+    return;
+  }
+  chatCountThisHour++;
+
+  const thinkingRes = await telegramCall<{ result?: { message_id: number } }>("sendMessage", {
+    chat_id: chatId,
+    text: "⏳ 思考中…",
+    reply_to_message_id: messageId,
+  }, 10_000);
+  const thinkingMsgId = thinkingRes?.result?.message_id;
+
+  const result = await cabinetPost<{ ok: boolean; output?: string; message?: string }>(
+    "/api/agents/headless",
+    { prompt: text },
+    CHAT_TIMEOUT_MS,
+  );
+
+  let replyText: string;
+  if (!result) {
+    replyText = "❌ Agent 超时或 Cabinet 服务不可用";
+  } else if (!result.ok) {
+    replyText = `❌ ${result.message || "Agent 执行失败"}`;
+  } else {
+    const output = (result.output || "").trim();
+    replyText = output.length > 0 ? output : "(agent 无输出)";
+    if (replyText.length > 4000) {
+      replyText = replyText.slice(0, 3990) + "\n… (已截断)";
+    }
+  }
+
+  if (thinkingMsgId) {
+    const edited = await editMessage(chatId, thinkingMsgId, replyText);
+    if (!edited) {
+      await sendMessage(chatId, replyText, { replyTo: messageId }).catch(() => {});
+    }
+  } else {
+    await sendMessage(chatId, replyText, { replyTo: messageId }).catch(() => {});
+  }
+}
+
 async function createAndTrackIssue(
   chatId: number, messageId: number, text: string,
   agentId?: string, agentName?: string,
@@ -1512,7 +1590,7 @@ async function pollOnce(): Promise<void> {
       if (text.startsWith("/")) {
         await handleCommand(chatId, text, msg.message_id);
       } else {
-        await createAndTrackIssue(chatId, msg.message_id, text);
+        await chatWithAgent(chatId, msg.message_id, text);
       }
     } catch (err) {
       console.error("[telegram-bot] message error:", (err as Error).message);
@@ -1565,7 +1643,10 @@ export async function startTelegramBot(options: TelegramBotRuntimeOptions = {}):
   loadTracking();
 
   botActive = true;
-  hourResetTimer = setInterval(() => { issueCountThisHour = 0; }, 60 * 60 * 1000);
+  hourResetTimer = setInterval(() => {
+    issueCountThisHour = 0;
+    chatCountThisHour = 0;
+  }, 60 * 60 * 1000);
 
   scheduleNextPoll();
   responsePollTimer = setInterval(() => { pollResponses().catch(() => {}); }, RESPONSE_POLL_MS);
