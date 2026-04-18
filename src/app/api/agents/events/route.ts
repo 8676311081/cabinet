@@ -1,31 +1,18 @@
 import { NextResponse } from "next/server";
+import path from "path";
 import { listPersonas } from "@/lib/agents/persona-manager";
 import { getGoalState } from "@/lib/agents/goal-manager";
 import { getMessages } from "@/lib/agents/slack-manager";
 import { getRespondingAgents } from "@/lib/agents/responding-agents";
-import fs from "fs/promises";
-import path from "path";
 import { DATA_DIR } from "@/lib/storage/path-utils";
+import { getDirectorySignature } from "@/lib/storage/fs-operations";
 import { getRunningConversationCounts, drainConversationNotifications } from "@/lib/agents/conversation-store";
 
 async function getDataDirVersion(): Promise<string> {
-  try {
-    const stat = await fs.stat(DATA_DIR);
-    const entries = await fs.readdir(DATA_DIR, { recursive: false });
-
-    // Also watch .agents dir so agent add/remove triggers a refresh
-    let agentsSig = "";
-    try {
-      const agentsDir = path.join(DATA_DIR, ".agents");
-      const agentStat = await fs.stat(agentsDir);
-      const agentEntries = await fs.readdir(agentsDir);
-      agentsSig = `${agentStat.mtimeMs}-${agentEntries.length}`;
-    } catch { /* ignore if .agents doesn't exist yet */ }
-
-    return `${stat.mtimeMs}-${entries.length}-${agentsSig}`;
-  } catch {
-    return "0";
-  }
+  const dataSig = await getDirectorySignature(DATA_DIR);
+  if (dataSig === null) return "0";
+  const agentsSig = (await getDirectorySignature(path.join(DATA_DIR, ".agents"))) ?? "";
+  return `${dataSig}-${agentsSig}`;
 }
 
 /**
