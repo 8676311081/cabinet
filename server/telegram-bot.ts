@@ -15,6 +15,7 @@ import { execFile } from "child_process";
 import { getLegacyIntegrationsPath } from "../src/lib/config/paths";
 import type { CabinetConfig } from "../src/lib/config/schema";
 import { getManagedDataDir } from "../src/lib/runtime/runtime-config";
+import { readMulticaPAT, readMulticaWorkspaceId } from "./multica-auth";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -56,43 +57,6 @@ function getTrackingPaths(dataDir = currentDataDir): {
     trackingFile: path.join(trackingDir, "tracked-issues.json"),
     workspaceIdFile: path.join(trackingDir, "workspace-id.txt"),
   };
-}
-
-/** Read the dynamic PAT from multica-pat.json (written by Electron main on startup). */
-function readMulticaPATFile(filePath: string): string {
-  try {
-    if (!fs.existsSync(filePath)) return "";
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const data = JSON.parse(raw) as { token?: unknown };
-    return typeof data.token === "string" ? data.token.trim() : "";
-  } catch {
-    return "";
-  }
-}
-
-function multicaPATCandidates(dataDir = currentDataDir): string[] {
-  const candidates = new Set<string>();
-  candidates.add(path.join(dataDir, ".agents", ".config", "multica-pat.json"));
-
-  return [...candidates];
-}
-
-function readMulticaPAT(): string {
-  // Always read from file FIRST — the file has the latest PAT from the current
-  // multica-server instance. process.env.MULTICA_PAT may be stale if the server restarted.
-  for (const candidate of multicaPATCandidates(currentDataDir)) {
-    const token = readMulticaPATFile(candidate);
-    if (token) {
-      process.env.MULTICA_PAT = token;
-      return token;
-    }
-  }
-
-  // Fallback to env var
-  const envPat = process.env.MULTICA_PAT?.trim();
-  if (envPat) return envPat;
-
-  return "";
 }
 
 const POLL_TIMEOUT_S = 30;
@@ -373,9 +337,9 @@ async function clearMessageKeyboard(chatId: string | number, messageId: number):
 
 function multicaHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
-  const pat = readMulticaPAT();
+  const pat = readMulticaPAT(currentDataDir);
   if (pat) h["Authorization"] = `Bearer ${pat}`;
-  const wsId = workspaceId || readWorkspaceIdFromFile() || process.env.MULTICA_WORKSPACE_ID || "";
+  const wsId = workspaceId || readMulticaWorkspaceId(currentDataDir) || process.env.MULTICA_WORKSPACE_ID || "";
   if (wsId) h["X-Workspace-ID"] = wsId;
   return h;
 }
@@ -475,7 +439,7 @@ async function resolveIssueIdByPrefix(prefix: string): Promise<string | null> {
 
   await ensureWorkspaceId();
   const params = new URLSearchParams();
-  const wsId = workspaceId || readWorkspaceIdFromFile() || "";
+  const wsId = workspaceId || readMulticaWorkspaceId(currentDataDir) || "";
   if (wsId) params.set("workspace_id", wsId);
   const result = await multicaGet<{ issues: MulticaIssue[] } | MulticaIssue[]>(
     `/api/issues${buildQueryString(params)}`,
@@ -521,16 +485,6 @@ function loadTracking(): void {
   }
 }
 
-function readWorkspaceIdFromFile(): string {
-  try {
-    const { workspaceIdFile } = getTrackingPaths();
-    if (!fs.existsSync(workspaceIdFile)) return "";
-    return fs.readFileSync(workspaceIdFile, "utf-8").trim();
-  } catch {
-    return "";
-  }
-}
-
 function persistWorkspaceId(nextWorkspaceId: string): void {
   if (!nextWorkspaceId) return;
   try {
@@ -573,7 +527,7 @@ async function resolveWorkspaceId(): Promise<string> {
 async function ensureWorkspaceId(force = false): Promise<string> {
   if (workspaceId) return workspaceId;
 
-  const persistedWorkspaceId = readWorkspaceIdFromFile();
+  const persistedWorkspaceId = readMulticaWorkspaceId(currentDataDir);
   if (persistedWorkspaceId) {
     workspaceId = persistedWorkspaceId;
     return workspaceId;

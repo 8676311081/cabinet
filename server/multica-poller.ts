@@ -14,6 +14,7 @@ import matter from "gray-matter";
 import { getDaemonPort, getManagedDataDir } from "../src/lib/runtime/runtime-config";
 import { getOrCreateDaemonToken } from "../src/lib/agents/daemon-auth";
 import { daemonBus } from "./daemon-bus";
+import { readMulticaPAT, readMulticaWorkspaceId } from "./multica-auth";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -98,45 +99,6 @@ function getMulticaDaemonTokenFile(dataDir = currentDataDir): string {
   return path.join(getAgentsDir(dataDir), "multica-daemon-token.json");
 }
 
-function getWorkspaceIdFile(dataDir = currentDataDir): string {
-  return path.join(getAgentsDir(dataDir), ".telegram", "workspace-id.txt");
-}
-
-function getMulticaPatFile(dataDir = currentDataDir): string {
-  return path.join(getAgentsDir(dataDir), ".config", "multica-pat.json");
-}
-
-function readMulticaPATFile(filePath: string): string {
-  try {
-    if (!fs.existsSync(filePath)) return "";
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const data = JSON.parse(raw) as { token?: unknown };
-    return typeof data.token === "string" ? data.token.trim() : "";
-  } catch {
-    return "";
-  }
-}
-
-function multicaPATCandidates(dataDir = currentDataDir): string[] {
-  const candidates = new Set<string>();
-  candidates.add(getMulticaPatFile(dataDir));
-
-  return [...candidates];
-}
-
-function getMulticaPAT(): string {
-  for (const candidate of multicaPATCandidates(currentDataDir)) {
-    const token = readMulticaPATFile(candidate);
-    if (token) {
-      process.env.MULTICA_PAT = token;
-      return token;
-    }
-  }
-
-  const envPat = process.env.MULTICA_PAT?.trim();
-  return envPat || "";
-}
-
 // ---------------------------------------------------------------------------
 // Multica daemon token (mdt_) — workspace-scoped, replaces user PAT for
 // /api/daemon/* calls so that a PAT leak can't be used against the full user
@@ -186,20 +148,10 @@ function daemonTokenFresh(entry: DaemonTokenCacheEntry | null, workspaceId: stri
   return expiresAt - Date.now() > DAEMON_TOKEN_REFRESH_MS;
 }
 
-function readWorkspaceIdFromFile(): string {
-  try {
-    const workspaceIdFile = getWorkspaceIdFile();
-    if (!fs.existsSync(workspaceIdFile)) return "";
-    return fs.readFileSync(workspaceIdFile, "utf-8").trim();
-  } catch {
-    return "";
-  }
-}
-
 function resolveWorkspaceIdSync(): string {
   const envId = process.env.MULTICA_WORKSPACE_ID?.trim();
   if (envId) return envId;
-  return readWorkspaceIdFromFile();
+  return readMulticaWorkspaceId(currentDataDir);
 }
 
 async function exchangeDaemonToken(workspaceId: string, daemonId: string, pat: string): Promise<DaemonTokenCacheEntry | null> {
@@ -243,7 +195,7 @@ async function getOrExchangeMulticaDaemonToken(): Promise<string> {
     return onDisk!.token;
   }
 
-  const pat = getMulticaPAT();
+  const pat = readMulticaPAT(currentDataDir);
   if (!pat) return "";
 
   const daemonId = onDisk?.daemon_id && onDisk.workspace_id === workspaceId
@@ -319,7 +271,7 @@ async function multicaDaemonHeaders(): Promise<Record<string, string>> {
     h["Authorization"] = `Bearer ${mdt}`;
     return h;
   }
-  const pat = getMulticaPAT();
+  const pat = readMulticaPAT(currentDataDir);
   if (pat) h["Authorization"] = `Bearer ${pat}`;
   return h;
 }
@@ -675,7 +627,7 @@ function scheduleNextPoll(state: AgentState): void {
 /** Reload personas and (re)start polling for those with multica_runtime_id. */
 export function reloadMulticaPoller(options: MulticaPollerOptions = {}): void {
   setMulticaPollerOptions(options);
-  if (!getMulticaPAT()) {
+  if (!readMulticaPAT(currentDataDir)) {
     // Don't spam logs on every reload if PAT is not configured
     return;
   }
@@ -711,7 +663,7 @@ export function reloadMulticaPoller(options: MulticaPollerOptions = {}): void {
 /** Start the Multica task poller. Call after the daemon HTTP server is listening. */
 export function startMulticaPoller(options: MulticaPollerOptions = {}): void {
   setMulticaPollerOptions(options);
-  if (!getMulticaPAT()) {
+  if (!readMulticaPAT(currentDataDir)) {
     console.log("[multica-poller] MULTICA_PAT not set — task polling disabled");
     return;
   }
